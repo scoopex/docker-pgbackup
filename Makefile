@@ -1,6 +1,11 @@
+SHELL=/bin/bash
+
+VERSION = $(shell git describe --abbrev=0 --tags)
+IMAGE_REPO = scoopex666
+IMAGE_NAME = pgbackup
 
 build:
-	docker build -t pgbackup .
+	docker build -t ${IMAGE_NAME}:${VERSION} -f Dockerfile .
 
 perms: 
 	chmod 755 scripts
@@ -9,6 +14,12 @@ perms:
 
 backup: perms
 	test ${PROFILE}
-	docker run -ti --network host -v /etc/host:/etc/host -v ${PWD}/backups/:/srv -v ${PWD}/scripts:/scripts -e ENV_FILE=/srv/pgbackup-${PROFILE}.env pgbackup 
+	docker run -ti --network host -v /etc/host:/etc/host -v ${PWD}/backups/:/srv -v ${PWD}/scripts:/scripts -e ENV_FILE=/srv/${PROFILE}.env ${IMAGE_NAME} 
 
+publish: 
+	@echo "publishing version ${VERSION}"
+	docker tag ${IMAGE_NAME}:${VERSION} ${IMAGE_REPO}/${IMAGE_NAME}:${VERSION}
+	docker push ${IMAGE_REPO}/${IMAGE_NAME}:${VERSION}
+	docker tag ${IMAGE_NAME}:${VERSION} ${IMAGE_REPO}/${IMAGE_NAME}:latest
+	docker push ${IMAGE_REPO}/${IMAGE_NAME}:latest
 
