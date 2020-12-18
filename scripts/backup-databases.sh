@@ -177,10 +177,11 @@ fi
 if [ -f "${CRYPT_FILE}" ];then
    echo "*** ENCRYPT BACKUPS ******************************************************************************"
    sendStatus "INFO: ENCRYPTING BACKUPS NOW"
-   while IFS= read -r -d $'\n' FILE;
+   while IFS= read -r -d $'\0' FILE;
    do
      STARTTIME="$SECONDS"
      if [ -f "${FILE}.gpg" ];then
+        echo "${FILE}.gpg already exists"
         continue
      fi
      echo "encryping $FILE"
@@ -195,7 +196,7 @@ if [ -f "${CRYPT_FILE}" ];then
        FAILED="$((FAILED + 1))"
           sendStatus "ERROR: FAILED TO ENCRYPT FILE '$FILE' after $DURATION minutes"
      fi
-  done < <( find "${BACKUPDIR}" -type f \( -name "*.custom.gz" -or -name "*.sql.gz" \) -print0)
+  done < <( find "${BACKUPDIR}" -type f \( -name "*.custom.gz" -or -name "*.sql.gz" \) -print0 )
 fi
 
 
@@ -206,7 +207,7 @@ if [ -n "$AZ_CONTAINER" ];then
    echo "*** UPLOAD BACKUPS ******************************************************************************"
    sendStatus "INFO: UPLOADING ENCRYPTED FILES NOW"
 
-   while IFS= read -r -d $'\n' FILE;
+   while IFS= read -r -d $'\0' FILE;
    do
      STARTTIME="$SECONDS"
      if [ -f "${FILE}.uploaded" ];then
