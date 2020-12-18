@@ -1,14 +1,18 @@
 #!/bin/bash
 
-
-STARTTIME_GLOBAL="$SECONDS"
+if  [ "${MANUAL:-false}" == "true" ];then
+   echo "MANUAL MODE, SLEEPING FOREVER : $(date)"
+   /bin/sleep infinity
+   exit 1
+fi
 
 if [ -n "$1" ];then
    exec "$@"
 fi
 
-ENV_FILE="${ENV_FILE:-/srv/pgbackup.env}"
-CRYPT_FILE="${CRYPT_FILE:-/srv/gpg-passphrase}"
+STARTTIME_GLOBAL="$SECONDS"
+ENV_FILE="${ENV_FILE:-/srv/conf/pgbackup.env}"
+CRYPT_FILE="${CRYPT_FILE:-/srv/conf/pgbackup.passphrase}"
 
 if [ -f "${ENV_FILE}" ];then
    echo "sourcing ${ENV_FILE}"
@@ -158,6 +162,9 @@ do
    fi
 done
 
+echo "INFO: PERFORMING FS SYNC NOW"
+sync
+
 DURATION="$(( $(( SECONDS - STARTTIME_GLOBAL )) / 60 ))"
 if [ "$FAILED" -gt 0 ];then 
   sendStatus "ERROR: FAILED ($FAILED failed backups,  $SUCCESSFUL successful backup ($DURATION minutes)"
@@ -191,6 +198,9 @@ if [ -f "${CRYPT_FILE}" ];then
   done < <( find "${BACKUPDIR}" -type f \( -name "*.custom.gz" -or -name "*.sql.gz" \) -print0)
 fi
 
+
+echo "INFO: PERFORMING FS SYNC NOW"
+sync
 
 if [ -n "$AZ_CONTAINER" ];then
    echo "*** UPLOAD BACKUPS ******************************************************************************"
@@ -233,6 +243,12 @@ else
 	echo "Age not correctly defined, '$MAXAGE'"
 	exit 1 
 fi
+
+
+echo "INFO: PERFORMING FS SYNC NOW"
+sync
+
+
 
 echo "*** OVERALL STATUS *******************************************************************************"
 
