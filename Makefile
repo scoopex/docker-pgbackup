@@ -14,7 +14,7 @@ perms:
 
 backup: perms
 	test ${PROFILE}
-	docker run -ti --network host -v /etc/host:/etc/host -v ${PWD}/backups/:/srv -v ${PWD}/scripts:/scripts -e ENV_FILE=/srv/${PROFILE}.env ${IMAGE_NAME} 
+	docker run -ti --network host -v /etc/host:/etc/host -v ${PWD}/backups/:/srv -v ${PWD}/scripts:/scripts -e ENV_FILE=/srv/conf/${PROFILE}.env -e CRYPT_FILE=/srv/conf/gpg-passphrase ${IMAGE_NAME} 
 
 publish: 
 	@echo "publishing version ${VERSION}"
