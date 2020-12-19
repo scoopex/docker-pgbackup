@@ -33,7 +33,7 @@ PG_IDENT="${PG_IDENT:-$PGHOST}"
 
 DUMPDIR="/srv/${PG_IDENT}/dump"
 BACKUPDIR="/srv/${PG_IDENT}/backup"
-AZ_CONTAINER=""
+
 
 export PGUSER
 export PGPORT
@@ -203,25 +203,30 @@ fi
 echo "INFO: PERFORMING FS SYNC NOW"
 sync
 
-if [ -n "$AZ_CONTAINER" ];then
+if [ -n "$S3_BUCKET_NAME" ];then
+   echo "*** CHECKING S3 BUCKET **************************************************************************"
+   s3cmd info $S3_BUCKET_NAME
+   if [ "$?" != "0" ];then
+      s3cmd mb "$S3_BUCKET_NAME"
+   fi
+
    echo "*** UPLOAD BACKUPS ******************************************************************************"
    sendStatus "INFO: UPLOADING ENCRYPTED FILES NOW"
 
    while IFS= read -r -d $'\0' FILE;
    do
      STARTTIME="$SECONDS"
-     if [ -f "${FILE}.uploaded" ];then
-         continue
+
+     S3_ADDRESS="${S3_BUCKET_NAME}/${FILE}"
+     s3cmd info "$S3_ADDRESS" &> /dev/null
+     if [ "$?" = "0" ];then
+        continue
      fi
-     echo "uploading $FILE"
-     az storage blob upload-batch \
-         --source "$FILE" \
-         --destination "$AZ_CONTAINER" \
-         --output none
+     s3cmd put "$FILE" "$S3_ADDRESS"
      RET="$?"
+
      DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"
      if [ "$RET" == "0" ];then
-          touch "${FILE}.uploaded"
           sendStatus "INFO: SUCESSFULLY ENCRYPTED FILE '$FILE' after $DURATION minutes"
           SUCCESSFUL="$(( SUCCESSFUL + 1))"
      else
