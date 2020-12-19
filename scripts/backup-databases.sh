@@ -7,15 +7,9 @@ ENV_FILE="${ENV_FILE:-/srv/conf/pgbackup.env}"
 CRYPT_FILE="${CRYPT_FILE:-/srv/conf/pgbackup.passphrase}"
 S3_CFG="${S3_CFG:-/srv/conf/s3cfg}"
 
-MAXAGE="${MAXAGE:?MAXAGE IN DAYS}"
 ZABBIX_SERVER="${ZABBIX_SERVER:-}"
 ZABBIX_HOST="${ZABBIX_HOST:-}"
 BACKUP_TYPE="${BACKUP_TYPE:-custom}"
-
-PGUSER="${PG_USER:?Postgres Username}"
-PGPORT="${PG_PORT:-5432}"
-PGHOST="${PG_HOST:?postgres host}"
-PGPASSWORD="${PG_PASS:?postgres superuser password}"
 
 PG_IDENT="${PG_IDENT:-$PGHOST}"
 
@@ -23,6 +17,13 @@ if [ -f "${ENV_FILE}" ];then
    echo "sourcing ${ENV_FILE}"
    source "${ENV_FILE}"
 fi
+
+MAXAGE="${MAXAGE:?MAXAGE IN DAYS}"
+PGUSER="${PG_USER:?Postgres Username}"
+PGPORT="${PG_PORT:-5432}"
+PGHOST="${PG_HOST:?postgres host}"
+PGPASSWORD="${PG_PASS:?postgres superuser password}"
+
 
 ln -snf $S3_CFG /home/pgbackup/.s3cfg
 
