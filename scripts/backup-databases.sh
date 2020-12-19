@@ -28,9 +28,9 @@ PGPASSWORD="${PG_PASS:?postgres superuser password}"
 ln -snf $S3_CFG /home/pgbackup/.s3cfg
 
 if  [ "${MANUAL:-false}" == "true" ];then
-   echo "MANUAL MODE, SLEEPING FOREVER : $(date)"
+   trap "exit 1" INT TERM
+   echo "MANUAL MODE, SLEEPING FOREVER : $(date) - SEND ME A SIGTERM TO EXIT WITH CODE 0"
    /bin/sleep infinity
-   exit 1
 fi
 
 if [ -n "$1" ];then
