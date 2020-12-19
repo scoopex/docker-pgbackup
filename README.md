@@ -1,5 +1,7 @@
 # docker-pgbackup
 
+# Install it
+
 
 # Launching manually for backup and restore
 
@@ -13,6 +15,7 @@
   ```
 * Enter POD
   ```
-  kubectl exec -ti postgresql-backup-manual -- /bin/bash
+  kubectl get pods|grep postgresql-backup-manual
+  kubectl exec -ti postgresql-backup-manual-<id> -- /bin/bash
   unset MANUAL
   ```

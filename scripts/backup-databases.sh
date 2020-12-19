@@ -13,6 +13,7 @@ fi
 STARTTIME_GLOBAL="$SECONDS"
 ENV_FILE="${ENV_FILE:-/srv/conf/pgbackup.env}"
 CRYPT_FILE="${CRYPT_FILE:-/srv/conf/pgbackup.passphrase}"
+S3_CFG="${S3_CFG:-/srv/conf/s3cfg}"
 
 if [ -f "${ENV_FILE}" ];then
    echo "sourcing ${ENV_FILE}"
@@ -204,10 +205,12 @@ echo "INFO: PERFORMING FS SYNC NOW"
 sync
 
 if [ -n "$S3_BUCKET_NAME" ];then
+   S3CMD="s3cmd --config=${S3_CFG}"
+
    echo "*** CHECKING S3 BUCKET **************************************************************************"
-   s3cmd info $S3_BUCKET_NAME
+   $S3CMD info $S3_BUCKET_NAME
    if [ "$?" != "0" ];then
-      s3cmd mb "$S3_BUCKET_NAME"
+      $S3CMD mb "$S3_BUCKET_NAME"
    fi
 
    echo "*** UPLOAD BACKUPS ******************************************************************************"
@@ -218,11 +221,11 @@ if [ -n "$S3_BUCKET_NAME" ];then
      STARTTIME="$SECONDS"
 
      S3_ADDRESS="${S3_BUCKET_NAME}/${FILE}"
-     s3cmd info "$S3_ADDRESS" &> /dev/null
+     $S3CMD info "$S3_ADDRESS" &> /dev/null
      if [ "$?" = "0" ];then
         continue
      fi
-     s3cmd put "$FILE" "$S3_ADDRESS"
+     $S3CMD put "$FILE" "$S3_ADDRESS"
      RET="$?"
 
      DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"

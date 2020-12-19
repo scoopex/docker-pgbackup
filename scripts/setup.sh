@@ -26,8 +26,8 @@ ROOTPW="$RANDOM$RANDOM$RANDOM"
 )|passwd root
 echo "ROOT PASSWORD : $ROOTPW" >&2
 
-useradd -u 1000 --no-user-group -g pgbackup -m -s /bin/bash --home-dir /srv/conf/ pgbackup
-chown -R pgbackup:pgbackup /srv/conf/
+useradd -u 1000 --no-user-group -g pgbackup -m -s /bin/bash pgbackup
+chown -R pgbackup:pgbackup /home/pgbackup
 
 chmod 755 /scripts
 chmod 644 /scripts/*
