@@ -187,7 +187,6 @@ if [ -f "${CRYPT_FILE}" ];then
    do
      STARTTIME="$SECONDS"
      if [ -f "${FILE}.gpg" ];then
-        echo "${FILE}.gpg already exists"
         continue
      fi
      echo "encryping $FILE"
