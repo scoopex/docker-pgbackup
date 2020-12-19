@@ -257,7 +257,7 @@ if ( echo -n "$MAXAGE"|grep -P -q '^\d+$' );then
       for DBNAME in $DATABASES;
       do
         echo "INFO: PRUNING OUTDATED BACKUPS FOR DATABASE $DBNAME IN $S3_BUCKET_NAME"
-        s3prune "$S3_BUCKET_NAME" "${MAXAGE} days ago" ".*/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg"
+        s3prune.sh "$S3_BUCKET_NAME" "${MAXAGE} days ago" ".*/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg"
       done
    fi
 
