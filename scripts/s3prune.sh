@@ -18,13 +18,17 @@ do
    createDate="$(date '+%s' -d "$createDate")"
    olderThan="$(date -d "$AGE" "+%s")"
    fileName="$(echo "$line"|awk '{print $4}')"
-   echo "$fileName"
    if [[ "$createDate" -lt "$olderThan" ]]
      then
        if [[ -n "$fileName" ]];
        then
            printf 'Deleting "%s"\n' "$fileName"
            s3cmd del "$fileName"
+           RET="$?"
+           if [ "$RET" != "0" ];then
+              echo "ERROR: DELETION FAILED WITH EXITCODE $EXITCODE "
+              exit 1
+           fi
        fi
    fi
 done;
