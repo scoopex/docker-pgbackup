@@ -1,24 +1,11 @@
 #!/bin/bash
 
-if  [ "${MANUAL:-false}" == "true" ];then
-   echo "MANUAL MODE, SLEEPING FOREVER : $(date)"
-   /bin/sleep infinity
-   exit 1
-fi
-
-if [ -n "$1" ];then
-   exec "$@"
-fi
+export PATH="/scripts/:$PATH"
 
 STARTTIME_GLOBAL="$SECONDS"
 ENV_FILE="${ENV_FILE:-/srv/conf/pgbackup.env}"
 CRYPT_FILE="${CRYPT_FILE:-/srv/conf/pgbackup.passphrase}"
 S3_CFG="${S3_CFG:-/srv/conf/s3cfg}"
-
-if [ -f "${ENV_FILE}" ];then
-   echo "sourcing ${ENV_FILE}"
-   source "${ENV_FILE}"
-fi
 
 MAXAGE="${MAXAGE:?MAXAGE IN DAYS}"
 ZABBIX_SERVER="${ZABBIX_SERVER:-}"
@@ -31,6 +18,23 @@ PGHOST="${PG_HOST:?postgres host}"
 PGPASSWORD="${PG_PASS:?postgres superuser password}"
 
 PG_IDENT="${PG_IDENT:-$PGHOST}"
+
+if [ -f "${ENV_FILE}" ];then
+   echo "sourcing ${ENV_FILE}"
+   source "${ENV_FILE}"
+fi
+
+ln -snf $S3_CFG /home/pgbackup/.s3cfg
+
+if  [ "${MANUAL:-false}" == "true" ];then
+   echo "MANUAL MODE, SLEEPING FOREVER : $(date)"
+   /bin/sleep infinity
+   exit 1
+fi
+
+if [ -n "$1" ];then
+   exec "$@"
+fi
 
 DUMPDIR="/srv/${PG_IDENT}/dump"
 BACKUPDIR="/srv/${PG_IDENT}/backup"
@@ -205,12 +209,10 @@ echo "INFO: PERFORMING FS SYNC NOW"
 sync
 
 if [ -n "$S3_BUCKET_NAME" ];then
-   S3CMD="s3cmd --config=${S3_CFG}"
-
    echo "*** CHECKING S3 BUCKET **************************************************************************"
-   $S3CMD info $S3_BUCKET_NAME
+   s3cmd info $S3_BUCKET_NAME
    if [ "$?" != "0" ];then
-      $S3CMD mb "$S3_BUCKET_NAME"
+      s3cmd mb "$S3_BUCKET_NAME"
    fi
 
    echo "*** UPLOAD BACKUPS ******************************************************************************"
@@ -220,23 +222,24 @@ if [ -n "$S3_BUCKET_NAME" ];then
    do
      STARTTIME="$SECONDS"
 
-     S3_ADDRESS="${S3_BUCKET_NAME}/${FILE}"
-     $S3CMD info "$S3_ADDRESS" &> /dev/null
+     S3_ADDRESS="${S3_BUCKET_NAME}/$( basename ${FILE} )"
+     s3cmd info "$S3_ADDRESS" &> /dev/null
      if [ "$?" = "0" ];then
         continue
      fi
-     $S3CMD put "$FILE" "$S3_ADDRESS"
+     s3cmd put "$FILE" "$S3_ADDRESS"
      RET="$?"
 
      DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"
      if [ "$RET" == "0" ];then
-          sendStatus "INFO: SUCESSFULLY ENCRYPTED FILE '$FILE' after $DURATION minutes"
+          sendStatus "INFO: SUCESSFULLY UPLOADED FILE '$FILE' after $DURATION minutes"
           SUCCESSFUL="$(( SUCCESSFUL + 1))"
      else
           FAILED="$((FAILED + 1))"
-          sendStatus "ERROR: FAILED TO ENCRYPT FILE '$FILE' after $DURATION minutes"
+          sendStatus "ERROR: FAILED TO UPLOADED FILE '$FILE' after $DURATION minutes"
      fi
   done < <( find "${BACKUPDIR}" -type f  -name "*.gpg" -print0)
+
 fi
 
 
@@ -248,6 +251,15 @@ if ( echo -n "$MAXAGE"|grep -P -q '^\d+$' );then
 	find "${BACKUPDIR}" -type f -name "*_currently_encrypting.gpg" -mtime +1 -exec rm -fv {} \;
 	find "${BACKUPDIR}" -type f -name "*_currently_dumping.sql.gz" -mtime +1 -exec rm -fv {} \;
 	find "${BACKUPDIR}" -type f -name "*_currently_dumping.custom.gz" -mtime +1 -exec rm -fv {} \;
+
+   if [ -n "$S3_BUCKET_NAME" ];then
+      for DBNAME in $DATABASES;
+      do
+        echo "INFO: PRUNING OUTDATED BACKUPS FOR DATABASE $DBNAME IN $S3_BUCKET_NAME"
+        s3prune "$S3_BUCKET_NAME" "${MAXAGE} days ago" ".*/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg"
+      done
+   fi
+
 else
 	echo "Age not correctly defined, '$MAXAGE'"
 	exit 1 
