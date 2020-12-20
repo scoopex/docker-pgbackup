@@ -20,7 +20,8 @@ if [ -f "${ENV_FILE}" ];then
    source "${ENV_FILE}"
 fi
 
-MAXAGE="${MAXAGE:?MAXAGE IN DAYS}"
+MAXAGE_PV="${MAXAGE_PV:-3}"
+MAXAGE_S3="${MAXAGE_S3:-30}"
 PGUSER="${POSTGRESQL_USERNAME:?Postgres Username}"
 PGPORT="${POSTGRESQL_PORT:-5432}"
 PGHOST="${POSTGRESQL_HOST:?postgres host}"
@@ -38,6 +39,7 @@ ln -snf "$S3_CFG" /home/pgbackup/.s3cfg
 if  [ "${MANUAL:-false}" == "true" ];then
    echo "MANUAL MODE, SLEEPING FOREVER : $(date) - SEND ME A SIGTERM TO EXIT WITH CODE 0"
    /bin/sleep infinity
+   exit 0
 fi
 
 if [ -n "$1" ];then
@@ -46,7 +48,6 @@ fi
 
 DUMPDIR="/srv/${PG_IDENT}/dump"
 BACKUPDIR="/srv/${PG_IDENT}/backup"
-
 
 export PGUSER
 export PGPORT
@@ -58,7 +59,8 @@ echo "** ENV_FILE      : $ENV_FILE"
 echo "** CRYPT_FILE    : $CRYPT_FILE"
 echo "** DUMPDIR       : $DUMPDIR"
 echo "** BACKUPDIR     : $BACKUPDIR"
-echo "** MAXAGE        : $MAXAGE days"
+echo "** MAXAGE_PV     : $MAXAGE_PV days"
+echo "** MAXAGE_S3     : $MAXAGE_S3 days"
 echo "** BACKUP_TYPE   : $BACKUP_TYPE"
 echo "**"
 echo "** PGUSER        : $PGUSER"
@@ -69,7 +71,7 @@ echo "** ZABBIX_HOST   : $ZABBIX_HOST"
 echo "**********************************************************************"
 
 
-if [ -z "$BACKUPDIR" ] || [ -z "$MAXAGE" ];then
+if [ -z "$BACKUPDIR" ] || [ -z "$MAXAGE_PV" ];then
    echo "ERROR: missing config params"
 	exit 1
 fi
@@ -247,32 +249,31 @@ fi
 
 
 echo "*** REMOVE OUTDATED BACKUPS **********************************************************************"
-if ( echo -n "$MAXAGE"|grep -P -q '^\d+$' );then
-	find "${BACKUPDIR}" -type f -name "*.uploaded" -mtime "+${MAXAGE}" -exec rm -fv {} \;
-	find "${BACKUPDIR}" -type f -name "*.custom.gz*" -mtime "+${MAXAGE}" -exec rm -fv {} \;
-	find "${BACKUPDIR}" -type f -name "*.sql.gz*" -mtime "+${MAXAGE}" -exec rm -fv {} \;
+
+if ( echo -n "$MAXAGE_PV"|grep -P -q '^\d+$' );then
+   echo "INFO: DELETING OUTDATED BACKUP ON PV (OLDER THAT $MAXAGE_PV days)"
+	find "${BACKUPDIR}" -type f -name "*.uploaded" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
+	find "${BACKUPDIR}" -type f -name "*.custom.gz*" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
+	find "${BACKUPDIR}" -type f -name "*.sql.gz*" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
 	find "${BACKUPDIR}" -type f -name "*_currently_encrypting.gpg" -mtime +1 -exec rm -fv {} \;
 	find "${BACKUPDIR}" -type f -name "*_currently_dumping.sql.gz" -mtime +1 -exec rm -fv {} \;
 	find "${BACKUPDIR}" -type f -name "*_currently_dumping.custom.gz" -mtime +1 -exec rm -fv {} \;
-
-   if [ -n "$S3_BUCKET_NAME" ];then
-      for DBNAME in $DATABASES;
-      do
-        echo "INFO: PRUNING OUTDATED BACKUPS FOR DATABASE $DBNAME IN $S3_BUCKET_NAME"
-        s3prune.sh "$S3_BUCKET_NAME" "${MAXAGE} days ago" ".*/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg"
-      done
-   fi
-
+   echo "INFO: PERFORMING FS SYNC NOW"
+   echo "TOTAL AMOUNT OF BACKUPS ON PV : $( du -scmh -- *.gz *.gpg|awk '/total/{print $1}')"
+   sync
 else
-	echo "Age not correctly defined, '$MAXAGE'"
+	echo "Age not correctly defined, '$MAXAGE_PV'"
 	exit 1 
 fi
 
-
-echo "INFO: PERFORMING FS SYNC NOW"
-sync
-
-
+if [[ -n "$MAXAGE_S3" ]] && [[ -n "$S3_BUCKET_NAME" ]];then
+      echo "INFO: DELETING OUTDATED BACKUP ON S3 (OLDER THAT '$MAXAGE_S3')"
+      for DBNAME in $DATABASES;
+      do
+        echo "INFO: PRUNING OUTDATED BACKUPS FOR DATABASE $DBNAME IN $S3_BUCKET_NAME"
+        s3prune.sh "$S3_BUCKET_NAME" "${MAXAGE_S3} days ago" ".*/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg"
+      done
+fi
 
 echo "*** OVERALL STATUS *******************************************************************************"
 
@@ -282,4 +283,3 @@ else
    sendStatus "OK: BACKUP SUCCESSFUL, $SUCCESSFUL SUCCESSFUL STEPS WITH $DBS DATABASES"
 fi
 
-echo "TOTAL AMOUNT OF BACKUPS $( du -scmh -- *.gz *.gpg|awk '/total/{print $1}')"
