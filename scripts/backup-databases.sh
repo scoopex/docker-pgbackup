@@ -28,14 +28,14 @@ PGPASSWORD="${POSTGRESQL_PASSWORD:?postgres superuser password}"
 
 
 if [[ -n "$CRYPT_PASSWORD"  ]];then
-   echo "INFO: WROTE CRYPT_PASSWORD TO $CRYPT_FILE"
+   CRYPT_FILE="$HOME/.crypt_password"
+   trap "rm -f $CRYPT_FILE" TERM INT EXIT
    echo -n "$CRYPT_PASSWORD" > "$CRYPT_FILE"
 fi
 
 ln -snf "$S3_CFG" /home/pgbackup/.s3cfg
 
 if  [ "${MANUAL:-false}" == "true" ];then
-   trap "exit 1" INT TERM
    echo "MANUAL MODE, SLEEPING FOREVER : $(date) - SEND ME A SIGTERM TO EXIT WITH CODE 0"
    /bin/sleep infinity
 fi
