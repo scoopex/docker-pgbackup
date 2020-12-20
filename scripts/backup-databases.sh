@@ -216,7 +216,7 @@ sync
 
 if [ -n "$S3_BUCKET_NAME" ];then
    echo "*** CHECKING S3 BUCKET **************************************************************************"
-   if( s3cmd info "$S3_BUCKET_NAME" ) ;then
+   if ( ! s3cmd info "$S3_BUCKET_NAME" ) ;then
       s3cmd mb "$S3_BUCKET_NAME"
    fi
 
