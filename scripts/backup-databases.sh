@@ -5,6 +5,8 @@ export PATH="/scripts/:$PATH"
 STARTTIME_GLOBAL="$SECONDS"
 ENV_FILE="${ENV_FILE:-/srv/conf/pgbackup.env}"
 CRYPT_FILE="${CRYPT_FILE:-/srv/conf/pgbackup.passphrase}"
+CRYPT_PASSWORD="${CRYPT_PASSWORD:-}"
+
 S3_CFG="${S3_CFG:-/srv/conf/s3cfg}"
 
 ZABBIX_SERVER="${ZABBIX_SERVER:-}"
@@ -19,13 +21,18 @@ if [ -f "${ENV_FILE}" ];then
 fi
 
 MAXAGE="${MAXAGE:?MAXAGE IN DAYS}"
-PGUSER="${PG_USER:?Postgres Username}"
-PGPORT="${PG_PORT:-5432}"
-PGHOST="${PG_HOST:?postgres host}"
-PGPASSWORD="${PG_PASS:?postgres superuser password}"
+PGUSER="${POSTGRESQL_USERNAME:?Postgres Username}"
+PGPORT="${POSTGRESQL_PORT:-5432}"
+PGHOST="${POSTGRESQL_HOST:?postgres host}"
+PGPASSWORD="${POSTGRESQL_PASSWORD:?postgres superuser password}"
 
 
-ln -snf $S3_CFG /home/pgbackup/.s3cfg
+if [[ -n "$CRYPT_PASSWORD"  ]];then
+   echo "INFO: WROTE CRYPT_PASSWORD TO $CRYPT_FILE"
+   echo -n "$CRYPT_PASSWORD" > "$CRYPT_FILE"
+fi
+
+ln -snf "$S3_CFG" /home/pgbackup/.s3cfg
 
 if  [ "${MANUAL:-false}" == "true" ];then
    trap "exit 1" INT TERM
@@ -85,7 +92,6 @@ if [ ! -d "$DUMPDIR" ];then
     mkdir -p "$DUMPDIR"
 fi
 
-cd "${BACKUPDIR}"
 if ! cd "${BACKUPDIR}" ;then
    echo "Unable to change to dir '${BACKUPDIR}'"
 	exit 1 
@@ -210,8 +216,7 @@ sync
 
 if [ -n "$S3_BUCKET_NAME" ];then
    echo "*** CHECKING S3 BUCKET **************************************************************************"
-   s3cmd info $S3_BUCKET_NAME
-   if [ "$?" != "0" ];then
+   if( s3cmd info "$S3_BUCKET_NAME" ) ;then
       s3cmd mb "$S3_BUCKET_NAME"
    fi
 
@@ -222,9 +227,8 @@ if [ -n "$S3_BUCKET_NAME" ];then
    do
      STARTTIME="$SECONDS"
 
-     S3_ADDRESS="${S3_BUCKET_NAME}/$( basename ${FILE} )"
-     s3cmd info "$S3_ADDRESS" &> /dev/null
-     if [ "$?" = "0" ];then
+     S3_ADDRESS="${S3_BUCKET_NAME}/$( basename "${FILE}" )"
+     if ( s3cmd info "$S3_ADDRESS" &> /dev/null );then
         continue
      fi
      s3cmd put "$FILE" "$S3_ADDRESS"
@@ -239,7 +243,6 @@ if [ -n "$S3_BUCKET_NAME" ];then
           sendStatus "ERROR: FAILED TO UPLOADED FILE '$FILE' after $DURATION minutes"
      fi
   done < <( find "${BACKUPDIR}" -type f  -name "*.gpg" -print0)
-
 fi
 
 
