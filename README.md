@@ -1,6 +1,6 @@
 # docker-pgbackup
 
-# Install it
+# Install it and run it
 
  * Modify settings
    ```
@@ -9,6 +9,11 @@
  * Apply config
    ```
    kubectl apply -n "<namespace>" kubernetes-cronjob.yaml
+   ```
+ * Check results
+   ```
+   kubectl get pods |grep postgresql-backup
+   kubectl logs postgresql-backup-...
    ```
 
 # Launching manually for backup and restore
