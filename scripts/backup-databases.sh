@@ -229,7 +229,7 @@ if [ -n "$S3_BUCKET_NAME" ];then
    do
      STARTTIME="$SECONDS"
 
-     S3_ADDRESS="${S3_BUCKET_NAME}/$( basename "${FILE}" )"
+     S3_ADDRESS="${S3_BUCKET_NAME}/${PG_IDENT}/$( basename "${FILE}" )"
      if ( s3cmd info "$S3_ADDRESS" &> /dev/null );then
         continue
      fi
@@ -271,7 +271,7 @@ if [[ -n "$MAXAGE_S3" ]] && [[ -n "$S3_BUCKET_NAME" ]];then
       for DBNAME in $DATABASES;
       do
         echo "INFO: PRUNING OUTDATED BACKUPS FOR DATABASE $DBNAME IN $S3_BUCKET_NAME"
-        s3prune.sh "$S3_BUCKET_NAME" "${MAXAGE_S3} days ago" ".*/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg"
+        s3prune.sh "$S3_BUCKET_NAME" "${MAXAGE_S3} days ago" ".*/${PG_IDENT}/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg"
       done
 fi
 
