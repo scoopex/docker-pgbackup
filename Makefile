@@ -14,7 +14,10 @@ perms:
 
 backup: perms
 	test ${PROFILE}
-	docker run -ti --network host -v /etc/host:/etc/host -v ${PWD}/backups/:/srv -v ${PWD}/scripts:/scripts -e ENV_FILE=/srv/conf/${PROFILE}.env -e CRYPT_FILE=/srv/conf/gpg-passphrase ${IMAGE_NAME}:${VERSION}
+	docker run -ti --network host --hostname "test-manual-test" -v /etc/host:/etc/host -v ${PWD}/backups/${PROFILE}/:/srv -v ${PWD}/scripts:/scripts -e ENV_FILE=/srv/conf/${PROFILE}.env -e CRYPT_FILE=/srv/conf/gpg-passphrase ${IMAGE_NAME}:${VERSION} 
+
+inspect: perms 
+	docker run -ti --network host --hostname "test-manual-test" -v /etc/host:/etc/host -v ${PWD}/backups/test/:/srv -v ${PWD}/scripts:/scripts -e ENV_FILE=/srv/conf/test.env -e CRYPT_FILE=/srv/conf/gpg-passphrase ${IMAGE_NAME}:${VERSION} -- /bin/bash
 
 publish: build
 	@echo "publishing version ${VERSION}"

@@ -18,6 +18,8 @@ PG_IDENT="${PG_IDENT:-$PGHOST}"
 if [ -f "${ENV_FILE}" ];then
    echo "sourcing ${ENV_FILE}"
    source "${ENV_FILE}"
+else
+   echo "environment file '${ENV_FILE}' does not exist"
 fi
 
 MAXAGE_PV="${MAXAGE_PV:-3}"
@@ -36,8 +38,8 @@ fi
 
 ln -snf "$S3_CFG" /home/pgbackup/.s3cfg
 
-if  [ "${MANUAL:-false}" == "true" ];then
-   echo "MANUAL MODE, SLEEPING FOREVER : $(date) - SEND ME A SIGTERM TO EXIT WITH CODE 0"
+if  [ "${MANUAL:-false}" == "true" ] || (hostname|grep -q -- "-manual-") ;then
+   echo "MANUAL MODE, SLEEPING FOREVER : $(date) - SEND ME A SIGTERM TO TERMINATE"
    /bin/sleep infinity
    exit 0
 fi
