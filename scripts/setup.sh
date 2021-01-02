@@ -27,6 +27,8 @@ ROOTPW="$RANDOM$RANDOM$RANDOM"
 echo "ROOT PASSWORD : $ROOTPW" >&2
 
 useradd -u 1000 --no-user-group -g pgbackup -m -s /bin/bash pgbackup
+echo 'export PATH="/srcipts:$PATH"' >> /home/pgbackup/.bashrc
+echo 'cd /srv' >> /home/pgbackup/.bashrc
 chown -R pgbackup:pgbackup /home/pgbackup
 
 chmod 755 /scripts
@@ -35,7 +37,6 @@ chmod 755 /scripts/*.sh
 ls -l /scripts/*
 chown -R root:root /scripts
 chown pgbackup:pgbackup /srv
-
 
 apt-get autoremove -y
 rm -rf /var/lib/apt/lists/*
