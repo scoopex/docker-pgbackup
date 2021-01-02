@@ -255,7 +255,7 @@ fi
 echo "*** REMOVE OUTDATED BACKUPS **********************************************************************"
 
 if ( echo -n "$MAXAGE_PV"|grep -P -q '^\d+$' );then
-   echo "INFO: DELETING OUTDATED BACKUP ON PV (OLDER THAT $MAXAGE_PV days)"
+   echo "INFO: DELETING OUTDATED BACKUP ON PV (OLDER THAN $MAXAGE_PV DAYS)"
 	find "${BACKUPDIR}" -type f -name "*.uploaded" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
 	find "${BACKUPDIR}" -type f -name "*.custom.gz*" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
 	find "${BACKUPDIR}" -type f -name "*.sql.gz*" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
@@ -271,10 +271,11 @@ else
 fi
 
 if [[ -n "$MAXAGE_S3" ]] && [[ -n "$S3_BUCKET_NAME" ]];then
-      echo "INFO: DELETING OUTDATED BACKUP ON S3 (OLDER THAT '$MAXAGE_S3')"
+      echo "INFO: DELETING OUTDATED BACKUP ON S3 (OLDER THAN $MAXAGE_S3 DAYS)"
       for DBNAME in $DATABASES;
       do
         echo "INFO: PRUNING OUTDATED BACKUPS FOR DATABASE $DBNAME IN $S3_BUCKET_NAME"
+        echo "s3prune.sh \"$S3_BUCKET_NAME\" \"${MAXAGE_S3} days ago\" \".*/${PG_IDENT}/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg\""
         s3prune.sh "$S3_BUCKET_NAME" "${MAXAGE_S3} days ago" ".*/${PG_IDENT}/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg"
       done
 fi
