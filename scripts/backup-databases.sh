@@ -275,7 +275,7 @@ if [[ -n "$MAXAGE_S3" ]] && [[ -n "$S3_BUCKET_NAME" ]];then
       for DBNAME in $DATABASES;
       do
         echo "INFO: PRUNING OUTDATED BACKUPS FOR DATABASE $DBNAME IN $S3_BUCKET_NAME"
-        echo "s3prune.sh \"$S3_BUCKET_NAME\" \"${MAXAGE_S3} days ago\" \".*/${PG_IDENT}/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg\""
+        echo "+s3prune.sh \"$S3_BUCKET_NAME\" \"${MAXAGE_S3} days ago\" \".*/${PG_IDENT}/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg\""
         s3prune.sh "$S3_BUCKET_NAME" "${MAXAGE_S3} days ago" ".*/${PG_IDENT}/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg"
       done
 fi
