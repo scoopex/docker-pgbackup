@@ -240,10 +240,16 @@ if [ -n "$S3_BUCKET_NAME" ];then
      s3cmd put "$FILE" "$S3_ADDRESS"
      RET="$?"
 
+     if [ "$RET" = "0" ];then
+        echo "deleting '$FILE'"
+        rm -f "$FILE"
+     fi
+
      DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"
      if [ "$RET" == "0" ];then
           sendStatus "INFO: SUCESSFULLY UPLOADED FILE '$FILE' after $DURATION minutes"
           SUCCESSFUL="$(( SUCCESSFUL + 1))"
+
      else
           FAILED="$((FAILED + 1))"
           sendStatus "ERROR: FAILED TO UPLOADED FILE '$FILE' after $DURATION minutes"
@@ -260,8 +266,8 @@ if ( echo -n "$MAXAGE_PV"|grep -P -q '^\d+$' );then
 	find "${BACKUPDIR}" -type f -name "*.custom.gz*" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
 	find "${BACKUPDIR}" -type f -name "*.sql.gz*" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
 	find "${BACKUPDIR}" -type f -name "*_currently_encrypting.gpg" -mtime +1 -exec rm -fv {} \;
-	find "${BACKUPDIR}" -type f -name "*_currently_dumping.sql.gz" -mtime +1 -exec rm -fv {} \;
-	find "${BACKUPDIR}" -type f -name "*_currently_dumping.custom.gz" -mtime +1 -exec rm -fv {} \;
+	find "${DUMPDIR}" -type f -name "*_currently_dumping.sql.gz" -mtime +1 -exec rm -fv {} \;
+	find "${DUMPDIR}" -type f -name "*_currently_dumping.custom.gz" -mtime +1 -exec rm -fv {} \;
    echo "INFO: PERFORMING FS SYNC NOW"
    echo "TOTAL AMOUNT OF BACKUPS ON PV : $( du -scmh -- *.gz *.gpg|awk '/total/{print $1}')"
    sync
