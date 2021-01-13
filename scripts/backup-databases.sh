@@ -31,7 +31,7 @@ PGPASSWORD="${POSTGRESQL_PASSWORD:?postgres superuser password}"
 
 
 if [[ -n "$CRYPT_PASSWORD"  ]];then
-   CRYPT_FILE="$HOME/.crypt_password"
+   CRYPT_FILE="$HOME/.crypt_password_$$"
    trap "rm -f $CRYPT_FILE" TERM INT EXIT
    echo -n "$CRYPT_PASSWORD" > "$CRYPT_FILE"
 fi
