@@ -31,6 +31,16 @@ echo 'export PATH="/scripts:$PATH"' >> /home/pgbackup/.bashrc
 echo 'cd /srv' >> /home/pgbackup/.bashrc
 chown -R pgbackup:pgbackup /home/pgbackup
 
+echo "set nocompatible" > /home/pgbackup/.vimrc
+
+cat >/home/pgbackup/.bashrc <<'EOF'
+export PGUSER="${POSTGRESQL_USERNAME:?Postgres Username}"
+export PGPORT="${POSTGRESQL_PORT:-5432}"
+export PGHOST="${POSTGRESQL_HOST:?postgres host}"
+export PGPASSWORD="${POSTGRESQL_PASSWORD:?postgres superuser password}"
+EOF
+
+
 chmod 755 /scripts
 chmod 644 /scripts/*
 chmod 755 /scripts/*.sh
