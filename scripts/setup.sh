@@ -26,8 +26,8 @@ ROOTPW="$RANDOM$RANDOM$RANDOM"
 )|passwd root
 echo "ROOT PASSWORD : $ROOTPW" >&2
 
-useradd -u 1000 --no-user-group -g pgbackup -m -s /bin/bash pgbackup
-echo 'export PATH="/srcipts:$PATH"' >> /home/pgbackup/.bashrc
+useradd -g pgbackup -G users -u 1000 -m -s /bin/bash pgbackup
+echo 'export PATH="/scripts:$PATH"' >> /home/pgbackup/.bashrc
 echo 'cd /srv' >> /home/pgbackup/.bashrc
 chown -R pgbackup:pgbackup /home/pgbackup
 
