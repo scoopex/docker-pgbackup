@@ -15,7 +15,6 @@ apt-get dist-upgrade -y
 apt-get autoremove -y
 apt-get clean
 
-groupadd -g 1001 pgbackup
 ROOTPW="$RANDOM$RANDOM$RANDOM"
 ( set +x;
   sleep 0.5;
@@ -26,7 +25,9 @@ ROOTPW="$RANDOM$RANDOM$RANDOM"
 )|passwd root
 echo "ROOT PASSWORD : $ROOTPW" >&2
 
+groupadd -g 1001 pgbackup
 useradd -g pgbackup -G users -u 1000 -m -s /bin/bash pgbackup
+
 echo 'export PATH="/scripts:$PATH"' >> /home/pgbackup/.bashrc
 echo 'cd /srv' >> /home/pgbackup/.bashrc
 chown -R pgbackup:pgbackup /home/pgbackup
