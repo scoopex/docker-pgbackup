@@ -1,35 +1,57 @@
 #!/bin/bash
 
+export PATH="/scripts/:$PATH"
 
 STARTTIME_GLOBAL="$SECONDS"
+ENV_FILE="${ENV_FILE:-/srv/conf/pgbackup.env}"
+CRYPT_FILE="${CRYPT_FILE:-/srv/conf/pgbackup.passphrase}"
+CRYPT_PASSWORD="${CRYPT_PASSWORD:-}"
+
+S3_CFG="${S3_CFG:-/srv/conf/s3cfg}"
+
+ZABBIX_SERVER="${ZABBIX_SERVER:-}"
+ZABBIX_HOST="${ZABBIX_HOST:-}"
+BACKUP_TYPE="${BACKUP_TYPE:-custom}"
+
+PG_IDENT="${PG_IDENT:-$PGHOST}"
+
+if [ -f "${ENV_FILE}" ];then
+   echo "sourcing ${ENV_FILE}"
+   source "${ENV_FILE}"
+else
+   echo "environment file '${ENV_FILE}' does not exist"
+fi
+
+MAXAGE_PV="${MAXAGE_PV:-3}"
+MAXAGE_S3="${MAXAGE_S3:-30}"
+PGUSER="${POSTGRESQL_USERNAME:?Postgres Username}"
+PGPORT="${POSTGRESQL_PORT:-5432}"
+PGHOST="${POSTGRESQL_HOST:?postgres host}"
+PGPASSWORD="${POSTGRESQL_PASSWORD:?postgres superuser password}"
+
+
+if [[ -n "$CRYPT_PASSWORD"  ]];then
+   CRYPT_FILE="$HOME/.crypt_password_$$"
+   trap "rm -f $CRYPT_FILE" TERM INT EXIT
+   echo -n "$CRYPT_PASSWORD" > "$CRYPT_FILE"
+fi
+
+ln -snf "$S3_CFG" /home/pgbackup/.s3cfg
+
+if [ "$$" == "1" ];then
+   if  [ "${MANUAL:-false}" == "true" ] || (hostname|grep -q -- "-manual-") ;then
+      echo "MANUAL MODE, SLEEPING FOREVER : $(date) - SEND ME A SIGTERM TO TERMINATE"
+      /bin/sleep infinity
+      exit 0
+   fi
+fi
 
 if [ -n "$1" ];then
    exec "$@"
 fi
 
-ENV_FILE="${ENV_FILE:-/srv/pgbackup.env}"
-CRYPT_FILE="${CRYPT_FILE:-/srv/gpg-passphrase}"
-
-if [ -f "${ENV_FILE}" ];then
-   echo "sourcing ${ENV_FILE}"
-   source "${ENV_FILE}"
-fi
-
-MAXAGE="${MAXAGE:?MAXAGE IN DAYS}"
-ZABBIX_SERVER="${ZABBIX_SERVER:-}"
-ZABBIX_HOST="${ZABBIX_HOST:-}"
-BACKUP_TYPE="${BACKUP_TYPE:-custom}"
-
-PGUSER="${PG_USER:?Postgres Username}"
-PGPORT="${PG_PORT:-5432}"
-PGHOST="${PG_HOST:?postgres host}"
-PGPASSWORD="${PG_PASS:?postgres superuser password}"
-
-PG_IDENT="${PG_IDENT:-$PGHOST}"
-
 DUMPDIR="/srv/${PG_IDENT}/dump"
 BACKUPDIR="/srv/${PG_IDENT}/backup"
-AZ_CONTAINER=""
 
 export PGUSER
 export PGPORT
@@ -41,7 +63,8 @@ echo "** ENV_FILE      : $ENV_FILE"
 echo "** CRYPT_FILE    : $CRYPT_FILE"
 echo "** DUMPDIR       : $DUMPDIR"
 echo "** BACKUPDIR     : $BACKUPDIR"
-echo "** MAXAGE        : $MAXAGE days"
+echo "** MAXAGE_PV     : $MAXAGE_PV days"
+echo "** MAXAGE_S3     : $MAXAGE_S3 days"
 echo "** BACKUP_TYPE   : $BACKUP_TYPE"
 echo "**"
 echo "** PGUSER        : $PGUSER"
@@ -52,7 +75,7 @@ echo "** ZABBIX_HOST   : $ZABBIX_HOST"
 echo "**********************************************************************"
 
 
-if [ -z "$BACKUPDIR" ] || [ -z "$MAXAGE" ];then
+if [ -z "$BACKUPDIR" ] || [ -z "$MAXAGE_PV" ];then
    echo "ERROR: missing config params"
 	exit 1
 fi
@@ -75,7 +98,6 @@ if [ ! -d "$DUMPDIR" ];then
     mkdir -p "$DUMPDIR"
 fi
 
-cd "${BACKUPDIR}"
 if ! cd "${BACKUPDIR}" ;then
    echo "Unable to change to dir '${BACKUPDIR}'"
 	exit 1 
@@ -158,6 +180,9 @@ do
    fi
 done
 
+echo "INFO: PERFORMING FS SYNC NOW"
+sync
+
 DURATION="$(( $(( SECONDS - STARTTIME_GLOBAL )) / 60 ))"
 if [ "$FAILED" -gt 0 ];then 
   sendStatus "ERROR: FAILED ($FAILED failed backups,  $SUCCESSFUL successful backup ($DURATION minutes)"
@@ -170,7 +195,7 @@ fi
 if [ -f "${CRYPT_FILE}" ];then
    echo "*** ENCRYPT BACKUPS ******************************************************************************"
    sendStatus "INFO: ENCRYPTING BACKUPS NOW"
-   while IFS= read -r -d $'\n' FILE;
+   while IFS= read -r -d $'\0' FILE;
    do
      STARTTIME="$SECONDS"
      if [ -f "${FILE}.gpg" ];then
@@ -188,50 +213,77 @@ if [ -f "${CRYPT_FILE}" ];then
        FAILED="$((FAILED + 1))"
           sendStatus "ERROR: FAILED TO ENCRYPT FILE '$FILE' after $DURATION minutes"
      fi
-  done < <( find "${BACKUPDIR}" -type f \( -name "*.custom.gz" -or -name "*.sql.gz" \) -print0)
+  done < <( find "${BACKUPDIR}" -type f \( -name "*.custom.gz" -or -name "*.sql.gz" \) -print0 )
 fi
 
 
-if [ -n "$AZ_CONTAINER" ];then
+echo "INFO: PERFORMING FS SYNC NOW"
+sync
+
+if [ -n "$S3_BUCKET_NAME" ];then
+   echo "*** CHECKING S3 BUCKET **************************************************************************"
+   if ( ! s3cmd info "$S3_BUCKET_NAME" ) ;then
+      s3cmd mb "$S3_BUCKET_NAME"
+   fi
+
    echo "*** UPLOAD BACKUPS ******************************************************************************"
    sendStatus "INFO: UPLOADING ENCRYPTED FILES NOW"
 
-   while IFS= read -r -d $'\n' FILE;
+   while IFS= read -r -d $'\0' FILE;
    do
      STARTTIME="$SECONDS"
-     if [ -f "${FILE}.uploaded" ];then
-         continue
+
+     S3_ADDRESS="${S3_BUCKET_NAME}/${PG_IDENT}/$( basename "${FILE}" )"
+     if ( s3cmd info "$S3_ADDRESS" &> /dev/null );then
+        continue
      fi
-     echo "uploading $FILE"
-     az storage blob upload-batch \
-         --source "$FILE" \
-         --destination "$AZ_CONTAINER" \
-         --output none
+     s3cmd put "$FILE" "$S3_ADDRESS"
      RET="$?"
+
+     if [ "$RET" = "0" ];then
+        echo "deleting '$FILE'"
+        rm -f "$FILE"
+     fi
+
      DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"
      if [ "$RET" == "0" ];then
-          touch "${FILE}.uploaded"
-          sendStatus "INFO: SUCESSFULLY ENCRYPTED FILE '$FILE' after $DURATION minutes"
+          sendStatus "INFO: SUCESSFULLY UPLOADED FILE '$FILE' after $DURATION minutes"
           SUCCESSFUL="$(( SUCCESSFUL + 1))"
+
      else
           FAILED="$((FAILED + 1))"
-          sendStatus "ERROR: FAILED TO ENCRYPT FILE '$FILE' after $DURATION minutes"
+          sendStatus "ERROR: FAILED TO UPLOADED FILE '$FILE' after $DURATION minutes"
      fi
   done < <( find "${BACKUPDIR}" -type f  -name "*.gpg" -print0)
 fi
 
 
 echo "*** REMOVE OUTDATED BACKUPS **********************************************************************"
-if ( echo -n "$MAXAGE"|grep -P -q '^\d+$' );then
-	find "${BACKUPDIR}" -type f -name "*.uploaded" -mtime "+${MAXAGE}" -exec rm -fv {} \;
-	find "${BACKUPDIR}" -type f -name "*.custom.gz*" -mtime "+${MAXAGE}" -exec rm -fv {} \;
-	find "${BACKUPDIR}" -type f -name "*.sql.gz*" -mtime "+${MAXAGE}" -exec rm -fv {} \;
+
+if ( echo -n "$MAXAGE_PV"|grep -P -q '^\d+$' );then
+   echo "INFO: DELETING OUTDATED BACKUP ON PV (OLDER THAN $MAXAGE_PV DAYS)"
+	find "${BACKUPDIR}" -type f -name "*.uploaded" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
+	find "${BACKUPDIR}" -type f -name "*.custom.gz*" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
+	find "${BACKUPDIR}" -type f -name "*.sql.gz*" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
 	find "${BACKUPDIR}" -type f -name "*_currently_encrypting.gpg" -mtime +1 -exec rm -fv {} \;
-	find "${BACKUPDIR}" -type f -name "*_currently_dumping.sql.gz" -mtime +1 -exec rm -fv {} \;
-	find "${BACKUPDIR}" -type f -name "*_currently_dumping.custom.gz" -mtime +1 -exec rm -fv {} \;
+	find "${DUMPDIR}" -type f -name "*_currently_dumping.sql.gz" -mtime +1 -exec rm -fv {} \;
+	find "${DUMPDIR}" -type f -name "*_currently_dumping.custom.gz" -mtime +1 -exec rm -fv {} \;
+   echo "INFO: PERFORMING FS SYNC NOW"
+   echo "TOTAL AMOUNT OF BACKUPS ON PV : $( du -scmh -- *.gz *.gpg|awk '/total/{print $1}')"
+   sync
 else
-	echo "Age not correctly defined, '$MAXAGE'"
+	echo "Age not correctly defined, '$MAXAGE_PV'"
 	exit 1 
+fi
+
+if [[ -n "$MAXAGE_S3" ]] && [[ -n "$S3_BUCKET_NAME" ]];then
+      echo "INFO: DELETING OUTDATED BACKUP ON S3 (OLDER THAN $MAXAGE_S3 DAYS)"
+      for DBNAME in $DATABASES;
+      do
+        echo "INFO: PRUNING OUTDATED BACKUPS FOR DATABASE $DBNAME IN $S3_BUCKET_NAME"
+        echo "+s3prune.sh \"$S3_BUCKET_NAME\" \"${MAXAGE_S3} days ago\" \".*/${PG_IDENT}/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg\""
+        s3prune.sh "$S3_BUCKET_NAME" "${MAXAGE_S3} days ago" ".*/${PG_IDENT}/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg"
+      done
 fi
 
 echo "*** OVERALL STATUS *******************************************************************************"
@@ -242,4 +294,3 @@ else
    sendStatus "OK: BACKUP SUCCESSFUL, $SUCCESSFUL SUCCESSFUL STEPS WITH $DBS DATABASES"
 fi
 
-echo "TOTAL AMOUNT OF BACKUPS $( du -scmh -- *.gz *.gpg|awk '/total/{print $1}')"
