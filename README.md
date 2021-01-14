@@ -18,7 +18,7 @@
 
 # Launching manually for backup and restore
 
-* Edit job description and set "MANUAL" to "true"
+* Edit job description and set "MANUAL" to "true" or name container hostname with a "-manual-" substring
   ```
   kubectl edit cronjobs.batch postgresql-backup
   ```
@@ -30,7 +30,7 @@
   ```
   kubectl get pods|grep postgresql-backup-manual
   kubectl exec -ti postgresql-backup-manual-<id> -- /bin/bash
-  unset MANUAL
+  # unset MANUAL
   /scripts/backup-databases.sh
   exit
   ```
