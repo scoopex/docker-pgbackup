@@ -25,7 +25,7 @@ endif
 
 inspect: perms 
 	docker run -ti --network host --hostname "test-manual" \
-		-v /etc/host:/etc/host \
+		-v /etc/hosts:/etc/hosts \
 		-v ${PWD}/backups/test/:/srv \
 		-v ${PWD}/scripts:/scripts \
 		-e ENV_FILE=/srv/conf/test.env \
