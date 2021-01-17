@@ -189,7 +189,7 @@ if [ "$BASE_BACKUP" = "true" ];then
      BASE_DUMPDIR="${DUMPDIR}/${TIMESTAMP}_base_backup"
      mkdir -p "${BASE_DUMPDIR}_currently_dumping" && \
       pg_basebackup -D "${BASE_DUMPDIR}_currently_dumping" --format=tar --gzip --progress --write-recovery-conf --verbose && \
-      mv -v "$BASE_DUMPDIR" "${BACKUPDIR}/$(basename "$BASE_DUMPDIR")"
+      mv -v "${BASE_DUMPDIR}_currently_dumping" "${BACKUPDIR}/$(basename "$BASE_DUMPDIR")"
      RET=$?
      DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"
      if [ "$RET1" == "0" ] && [ "$RET2" == "0" ] && [ "$RET3" == "0" ];then
@@ -250,11 +250,11 @@ if [ -f "${CRYPT_FILE}" ];then
      RET="$?"
      DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"
      if [ "$RET" == "0" ];then
-          sendStatus "INFO: SUCESSFULLY ENCRYPTED FILE '$BASE_BACKUP_DIR' after $DURATION minutes"
+          sendStatus "INFO: SUCESSFULLY ENCRYPTED BASE BACKUP TO FILE '${BASE_BACKUP_DIR}.tar.gpg' after $DURATION minutes"
           SUCCESSFUL="$(( SUCCESSFUL + 1))"
      else
        FAILED="$((FAILED + 1))"
-          sendStatus "ERROR: FAILED TO ENCRYPT FILE '$BASE_BACKUP_DIR' after $DURATION minutes"
+          sendStatus "ERROR: FAILED TO ENCRYPT BASE BACKUP TO FILE '${BASE_BACKUP_DIR}.tar.gpg' after $DURATION minutes"
      fi
   done < <( find "${BACKUPDIR}" -type d -name "*_base_backup" -print0 )
 
@@ -286,7 +286,7 @@ if [ -n "$S3_BUCKET_NAME" ];then
      RET="$?"
 
      if [ "$RET" = "0" ];then
-        echo "trimming '$FILE'"
+        echo "trimming '$FILE' to save filesystem space"
         echo > "$FILE"
      fi
 
