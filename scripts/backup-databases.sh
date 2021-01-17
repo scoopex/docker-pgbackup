@@ -12,11 +12,13 @@ S3_CFG="${S3_CFG:-/srv/conf/s3cfg}"
 ZABBIX_SERVER="${ZABBIX_SERVER:-}"
 ZABBIX_HOST="${ZABBIX_HOST:-}"
 BACKUP_TYPE="${BACKUP_TYPE:-custom}"
+BASE_BACKUP="${BASE_BACKUP:-false}"
 
 PG_IDENT="${PG_IDENT:-$PGHOST}"
 
 if [ -f "${ENV_FILE}" ];then
    echo "sourcing ${ENV_FILE}"
+   # shellcheck source=/dev/null
    source "${ENV_FILE}"
 else
    echo "environment file '${ENV_FILE}' does not exist"
@@ -31,8 +33,8 @@ PGPASSWORD="${POSTGRESQL_PASSWORD:?postgres superuser password}"
 
 
 if [[ -n "$CRYPT_PASSWORD"  ]];then
-   CRYPT_FILE="$HOME/.crypt_password_$$"
-   trap "rm -f $CRYPT_FILE" TERM INT EXIT
+   CRYPT_FILE="$HOME/.crypt_password"
+   trap 'rm -f $CRYPT_FILE' TERM INT EXIT
    echo -n "$CRYPT_PASSWORD" > "$CRYPT_FILE"
 fi
 
@@ -66,6 +68,7 @@ echo "** BACKUPDIR     : $BACKUPDIR"
 echo "** MAXAGE_PV     : $MAXAGE_PV days"
 echo "** MAXAGE_S3     : $MAXAGE_S3 days"
 echo "** BACKUP_TYPE   : $BACKUP_TYPE"
+echo "** BASE_BACKUP   : $BASE_BACKUP"
 echo "**"
 echo "** PGUSER        : $PGUSER"
 echo "**"
@@ -102,8 +105,8 @@ if ! cd "${BACKUPDIR}" ;then
 	exit 1 
 fi
 
-if ( ! ( echo "$BACKUP_TYPE" |grep -q -P "custom|sql" ) );then
-   echo "Wrong backup type '$BACKUP_TYPE', use 'cusom' or 'sql'"
+if ( ! ( echo "$BACKUP_TYPE" |grep -q -P '^(custom|sql|no)$' ) );then
+   echo "Wrong backup type '$BACKUP_TYPE', use 'cusom', 'sql' or 'no'"
    exit 1
 fi
 
@@ -149,6 +152,8 @@ do
       pg_dump -Fc -c -f "${DUMPDIR}/${DBNAME}-${TIMESTAMP}_currently_dumping.custom.gz" -Z 7 --inserts "$DBNAME" && 
          mv "${DUMPDIR}/${DBNAME}-${TIMESTAMP}_currently_dumping.custom.gz" "${DUMPDIR}/${DBNAME}-${TIMESTAMP}.custom.gz"
       RET2="$?"
+   elif [ "$BACKUP_TYPE" = "no" ];then
+      echo "INFO: PER DATABASE BACKUP DISABLED"
    else
       pg_dump -f "${DUMPDIR}/${DBNAME}-${TIMESTAMP}_currently_dumping.sql.gz" -Z 7 "$DBNAME" && 
          mv "${DUMPDIR}/${DBNAME}-${TIMESTAMP}_currently_dumping.sql.gz" "${DUMPDIR}/${DBNAME}-${TIMESTAMP}.sql.gz"
@@ -179,6 +184,23 @@ do
    fi
 done
 
+if [ "$BASE_BACKUP" = "true" ];then
+   echo "*** BASE BACKUP *******************************************************************************"
+     BASE_DUMPDIR="${DUMPDIR}/${TIMESTAMP}_base_backup"
+     mkdir -p "${BASE_DUMPDIR}_currently_dumping" && \
+      pg_basebackup -D "${BASE_DUMPDIR}_currently_dumping" --format=tar --gzip --progress --write-recovery-conf --verbose && \
+      mv -v "$BASE_DUMPDIR" "${BACKUPDIR}/$(basename "$BASE_DUMPDIR")"
+     RET=$?
+     DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"
+     if [ "$RET1" == "0" ] && [ "$RET2" == "0" ] && [ "$RET3" == "0" ];then
+          sendStatus "INFO: SUCESSFULLY CREATED BASE BACKUP after $DURATION minutes"
+          SUCCESSFUL="$(( SUCCESSFUL + 1))"
+     else
+       FAILED="$((FAILED + 1))"
+          sendStatus "ERROR: FAILED TO CREATE BASE BACKUP after $DURATION minutes"
+     fi
+fi
+
 echo "INFO: PERFORMING FS SYNC NOW"
 sync
 
@@ -193,7 +215,7 @@ fi
 
 if [ -f "${CRYPT_FILE}" ];then
    echo "*** ENCRYPT BACKUPS ******************************************************************************"
-   sendStatus "INFO: ENCRYPTING BACKUPS NOW"
+   sendStatus "INFO: ENCRYPTING DATABASE BACKUPS NOW"
    while IFS= read -r -d $'\0' FILE;
    do
      STARTTIME="$SECONDS"
@@ -212,7 +234,31 @@ if [ -f "${CRYPT_FILE}" ];then
        FAILED="$((FAILED + 1))"
           sendStatus "ERROR: FAILED TO ENCRYPT FILE '$FILE' after $DURATION minutes"
      fi
-  done < <( find "${BACKUPDIR}" -type f \( -name "*.custom.gz" -or -name "*.sql.gz" \) -print0 )
+  done < <( find "${BACKUPDIR}" -type f \( -name "*.custom.gz" -or -name "*.sql.gz"  \) -print0 )
+
+  sendStatus "INFO: ENCRYPTING BASE BACKUPS NOW"
+  while IFS= read -r -d $'\0' BASE_BACKUP_DIR;
+  do
+     STARTTIME="$SECONDS"
+     if [ -f "${BASE_BACKUP_DIR}.tar.gpg" ];then
+        continue
+     fi
+     echo "encryping $BASE_BACKUP_DIR"
+     tar c "${BASE_BACKUP_DIR}" | \
+           gpg --symmetric --batch --cipher-algo aes256  --passphrase-file "$CRYPT_FILE" -o "${BASE_BACKUP_DIR}_currently_encrypting.tar.gpg"  &&
+        mv "${BASE_BACKUP_DIR}_currently_encrypting.tar.gpg" "${BASE_BACKUP_DIR}.tar.gpg"
+     RET="$?"
+     DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"
+     if [ "$RET" == "0" ];then
+          sendStatus "INFO: SUCESSFULLY ENCRYPTED FILE '$BASE_BACKUP_DIR' after $DURATION minutes"
+          SUCCESSFUL="$(( SUCCESSFUL + 1))"
+     else
+       FAILED="$((FAILED + 1))"
+          sendStatus "ERROR: FAILED TO ENCRYPT FILE '$BASE_BACKUP_DIR' after $DURATION minutes"
+     fi
+  done < <( find "${BACKUPDIR}" -type d -name "*_base_backup" -print0 )
+
+
 fi
 
 
@@ -240,8 +286,8 @@ if [ -n "$S3_BUCKET_NAME" ];then
      RET="$?"
 
      if [ "$RET" = "0" ];then
-        echo "deleting '$FILE'"
-        rm -f "$FILE"
+        echo "trimming '$FILE'"
+        echo > "$FILE"
      fi
 
      DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"
@@ -264,9 +310,11 @@ if ( echo -n "$MAXAGE_PV"|grep -P -q '^\d+$' );then
 	find "${BACKUPDIR}" -type f -name "*.uploaded" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
 	find "${BACKUPDIR}" -type f -name "*.custom.gz*" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
 	find "${BACKUPDIR}" -type f -name "*.sql.gz*" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
+   find "${BACKUPDIR}" -name "*_base_backup*" -mtime "+${MAXAGE_PV}" -exec rm -frv {} \;
 	find "${BACKUPDIR}" -type f -name "*_currently_encrypting.gpg" -mtime +1 -exec rm -fv {} \;
 	find "${DUMPDIR}" -type f -name "*_currently_dumping.sql.gz" -mtime +1 -exec rm -fv {} \;
 	find "${DUMPDIR}" -type f -name "*_currently_dumping.custom.gz" -mtime +1 -exec rm -fv {} \;
+   find "${DUMPDIR}" -type d -name "*_currently_dumping" -mtime +1 -exec rm -frv {} \;
    echo "INFO: PERFORMING FS SYNC NOW"
    echo "TOTAL AMOUNT OF BACKUPS ON PV : $( du -scmh -- *.gz *.gpg|awk '/total/{print $1}')"
    sync
