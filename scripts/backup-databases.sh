@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -eu
+
 #######################################################################################################################################
 ####
 #### INIT
@@ -30,7 +32,7 @@ else
    echo "environment file '${ENV_FILE}' does not exist"
 fi
 
-MAXAGE_PV="${MAXAGE_PV:-3}"
+MAXAGE_LOCAL="${MAXAGE_LOCAL:-3}"
 MAXAGE_REMOTE="${MAXAGE_REMOTE:-30}"
 PGUSER="${POSTGRESQL_USERNAME:?Postgres Username}"
 PGPORT="${POSTGRESQL_PORT:-5432}"
@@ -70,7 +72,7 @@ echo "** ENV_FILE       : $ENV_FILE"
 echo "** CRYPT_FILE     : $CRYPT_FILE"
 echo "** DUMPDIR        : $DUMPDIR"
 echo "** BACKUPDIR      : $BACKUPDIR"
-echo "** MAXAGE_PV      : $MAXAGE_PV days"
+echo "** MAXAGE_LOCAL   : $MAXAGE_LOCAL days"
 echo "** MAXAGE_REMOTE  : $MAXAGE_REMOTE days"
 echo "** UPLOAD_TYPE    : $UPLOAD_TYPE"
 echo "** BACKUP_TYPE    : $BACKUP_TYPE"
@@ -81,11 +83,11 @@ echo "**"
 echo "** ZABBIX_SERVER  : $ZABBIX_SERVER" 
 echo "** ZABBIX_HOST    : $ZABBIX_HOST"
 echo "**"
-echo "** S3_BUCKET_NAME : $S3_BUCKET_NAME"
+echo "** BUCKET_NAME    : $BUCKET_NAME"
 echo "**********************************************************************"
 
 
-if [ -z "$BACKUPDIR" ] || [ -z "$MAXAGE_PV" ];then
+if [ -z "$BACKUPDIR" ] || [ -z "$MAXAGE_LOCAL" ];then
    echo "ERROR: missing config params"
 	exit 1
 fi
@@ -112,14 +114,15 @@ sync_fs(){
 upload_backup_setup(){
  echo "INFO: setup backup upload"
  if [ "$UPLOAD_TYPE" = "s3" ];then
-     if ( ! s3cmd info "$S3_BUCKET_NAME" ) ;then
-         s3cmd mb "$S3_BUCKET_NAME"
+     if ( ! s3cmd info "$BUCKET_NAME" ) ;then
+         s3cmd mb "$BUCKET_NAME"
          return $?
      fi
      return 0
  elif [ "$UPLOAD_TYPE" = "az" ];then
-    echo "ERROR: NOT IMPLEMENTED"
-    exit 1
+    if ( az storage container exists --name test --output table|tail -1|grep -P "^False$" &> /dev/null );then
+      az storage container create --name "${BUCKET_NAME}"
+    fi
  else
     echo "INFO: UPLOAD DISABLED"
     return 0
@@ -127,19 +130,22 @@ upload_backup_setup(){
 
 }
 upload_backup(){
- local PG_IDENT="$1"
- local UPLOAD_NAME="$2"
+ local UPLOAD_NAME="$1"
 
  if [ "$UPLOAD_TYPE" = "s3" ];then
-     S3_ADDRESS="${S3_BUCKET_NAME}/${PG_IDENT}/${UPLOAD_NAME}"
+     S3_ADDRESS="${BUCKET_NAME}/${PG_IDENT}/${UPLOAD_NAME}"
      if ( s3cmd info "$S3_ADDRESS" &> /dev/null );then
         return 0
      fi
      s3cmd put "$FILE" "$S3_ADDRESS"
      RET_UPLOAD="$?"
  elif [ "$UPLOAD_TYPE" = "az" ];then
-    echo "ERROR: NOT IMPLEMENTED"
-    exit 1
+    AZ_ADDRESS="${PG_IDENT}/${UPLOAD_NAME}"
+    if ( az storage blob exists  --container "${BUCKET_NAME}" --name "$AZ_ADDRESS" --output table|tail -1|grep -P "^True$");then
+        return 0
+    fi
+    az storage blob upload  --file "$UPLOAD_NAME" --name "$AZ_ADDRESS" --container "${BUCKET_NAME}"
+    RET_UPLOAD="$?"
  else
     echo "INFO: UPLOAD DISABLED"
     return 0
@@ -341,7 +347,7 @@ while IFS= read -r -d $'\0' FILE;
 do
    STARTTIME="$SECONDS"
 
-   upload_backup "${PG_IDENT}" "$( basename "${UPLOAD_FILE}" )"
+   upload_backup "$( basename "${UPLOAD_FILE}" )"
    RET="$?"
 
    DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"
@@ -358,12 +364,12 @@ done < <( find "${BACKUPDIR}" -type f  -name "*.gpg" -print0)
 
 echo "*** REMOVE OUTDATED BACKUPS **********************************************************************"
 
-if ( echo -n "$MAXAGE_PV"|grep -P -q '^\d+$' ) && [ "$MAXAGE_PV" != "0" ] ;then
-   echo "INFO: DELETING OUTDATED BACKUP ON PV (OLDER THAN $MAXAGE_PV DAYS)"
-	find "${BACKUPDIR}" -type f -name "*.uploaded" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
-	find "${BACKUPDIR}" -type f -name "*.custom.gz*" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
-	find "${BACKUPDIR}" -type f -name "*.sql.gz*" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
-   find "${BACKUPDIR}" -name "*_base_backup*" -mtime "+${MAXAGE_PV}" -exec rm -frv {} \;
+if ( echo -n "$MAXAGE_LOCAL"|grep -P -q '^\d+$' ) && [ "$MAXAGE_LOCAL" != "0" ] ;then
+   echo "INFO: DELETING OUTDATED BACKUP ON PV (OLDER THAN $MAXAGE_LOCAL DAYS)"
+	find "${BACKUPDIR}" -type f -name "*.uploaded" -mtime "+${MAXAGE_LOCAL}" -exec rm -fv {} \;
+	find "${BACKUPDIR}" -type f -name "*.custom.gz*" -mtime "+${MAXAGE_LOCAL}" -exec rm -fv {} \;
+	find "${BACKUPDIR}" -type f -name "*.sql.gz*" -mtime "+${MAXAGE_LOCAL}" -exec rm -fv {} \;
+   find "${BACKUPDIR}" -name "*_base_backup*" -mtime "+${MAXAGE_LOCAL}" -exec rm -frv {} \;
 	find "${BACKUPDIR}" -type f -name "*_currently_encrypting.gpg" -mtime +1 -exec rm -fv {} \;
 	find "${DUMPDIR}" -type f -name "*_currently_dumping.sql.gz" -mtime +1 -exec rm -fv {} \;
 	find "${DUMPDIR}" -type f -name "*_currently_dumping.custom.gz" -mtime +1 -exec rm -fv {} \;
@@ -371,17 +377,17 @@ if ( echo -n "$MAXAGE_PV"|grep -P -q '^\d+$' ) && [ "$MAXAGE_PV" != "0" ] ;then
    echo "TOTAL AMOUNT OF BACKUPS ON PV : $( du -scmh -- *.gz *.gpg|awk '/total/{print $1}')"
    sync_fs
 else
-	echo "Age not correctly defined, '$MAXAGE_PV'"
+	echo "Age not correctly defined, '$MAXAGE_LOCAL'"
 	exit 1 
 fi
 
-if [[ -n "$MAXAGE_REMOTE" ]] && [[ "$MAXAGE_REMOTE" = "0" ]] && [[ -n "$S3_BUCKET_NAME" ]] && [[ "$UPLOAD_TYPE" == "s3" ]];then
+if [[ -n "$MAXAGE_REMOTE" ]] && [[ "$MAXAGE_REMOTE" = "0" ]] && [[ -n "$BUCKET_NAME" ]] && [[ "$UPLOAD_TYPE" == "s3" ]];then
       echo "INFO: DELETING OUTDATED BACKUP ON S3 (OLDER THAN $MAXAGE_REMOTE DAYS)"
       for DBNAME in $DATABASES;
       do
-        echo "INFO: PRUNING OUTDATED BACKUPS FOR DATABASE $DBNAME IN $S3_BUCKET_NAME"
-        echo "+s3prune.sh \"$S3_BUCKET_NAME\" \"${MAXAGE_REMOTE} days ago\" \".*/${PG_IDENT}/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg\""
-        s3prune.sh "$S3_BUCKET_NAME" "${MAXAGE_REMOTE} days ago" ".*/${PG_IDENT}/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg"
+        echo "INFO: PRUNING OUTDATED BACKUPS FOR DATABASE $DBNAME IN $BUCKET_NAME"
+        echo "+s3prune.sh \"$BUCKET_NAME\" \"${MAXAGE_REMOTE} days ago\" \".*/${PG_IDENT}/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg\""
+        s3prune.sh "$BUCKET_NAME" "${MAXAGE_REMOTE} days ago" ".*/${PG_IDENT}/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg"
       done
 fi
 
