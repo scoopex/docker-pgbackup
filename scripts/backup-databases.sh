@@ -120,7 +120,7 @@ upload_backup_setup(){
      fi
      return 0
  elif [ "$UPLOAD_TYPE" = "az" ];then
-    if ( az storage container exists --name "${BUCKET_NAME}" --output table|tail -1|grep -P "^False$" &> /dev/null );then
+    if ( az storage container exists --name "${BUCKET_NAME}" --output table|tail -1|grep -P '^False$' &> /dev/null );then
       az storage container create --name "${BUCKET_NAME}"
     fi
  else
@@ -141,7 +141,7 @@ upload_backup(){
      RET_UPLOAD="$?"
  elif [ "$UPLOAD_TYPE" = "az" ];then
     AZ_ADDRESS="${PG_IDENT}/${UPLOAD_NAME}"
-    if ( az storage blob exists  --container "${BUCKET_NAME}" --name "$AZ_ADDRESS" --output table|tail -1|grep -P "^True$");then
+    if ( az storage blob exists  --container "${BUCKET_NAME}" --name "$AZ_ADDRESS" --output table|tail -1|grep -P '^True$');then
         return 0
     fi
     az storage blob upload  --file "$UPLOAD_NAME" --name "$AZ_ADDRESS" --container "${BUCKET_NAME}"
