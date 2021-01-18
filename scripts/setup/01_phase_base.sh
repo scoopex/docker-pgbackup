@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 set -eux
 
@@ -16,6 +16,9 @@ apt-get upgrade -y
 apt-get dist-upgrade -y
 apt-get autoremove -y
 apt-get clean
+apt-get autoremove -y
+rm -rf /var/lib/apt/lists/*
+
 
 ROOTPW="$RANDOM$RANDOM$RANDOM"
 ( set +x;
@@ -43,14 +46,3 @@ export PGHOST="${POSTGRESQL_HOST:?postgres host}"
 export PGPASSWORD="${POSTGRESQL_PASSWORD:?postgres superuser password}"
 EOF
 
-
-chmod 755 /scripts
-chmod 644 /scripts/*
-chmod 755 /scripts/*.sh
-ls -l /scripts/*
-chown -R root:root /scripts
-chown pgbackup:pgbackup /srv
-
-apt-get autoremove -y
-rm -rf /var/lib/apt/lists/*
-rm "$0"

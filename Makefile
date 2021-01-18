@@ -1,11 +1,15 @@
 SHELL=/bin/bash
 
 VERSION = $(shell git describe --abbrev=0 --tags)
+
+FORCE_UPGRADE_MARKER ?= $(shell date "+%Y-%m-%d")
+
 IMAGE_REPO = getflip
 IMAGE_NAME = pgbackup
 
 build:
-	docker build -t ${IMAGE_NAME}:${VERSION} -f Dockerfile .
+	@echo "the FORCE_UPGRADE_MARKER variable forces a upgrade every day, current value is : ${FORCE_UPGRADE_MARKER}"
+	docker build --build-arg FORCE_UPGRADE_MARKER="${FORCE_UPGRADE_MARKER}" -t ${IMAGE_NAME}:${VERSION} -f Dockerfile .
 
 perms: 
 	chmod 755 scripts
