@@ -4,12 +4,14 @@ set -eux
 
 apt-get autoremove -y
 source /etc/lsb-release
+
 apt-get update 
 apt-get install curl gnupg2 -y
 echo "deb http://apt.postgresql.org/pub/repos/apt ${DISTRIB_CODENAME}-pgdg main" > /etc/apt/sources.list.d/pgdg.list
 curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
 apt-get update 
-apt-get install postgresql-client-11 zabbix-agent curl netcat-openbsd vim-tiny s3cmd pv azure-cli -y
+
+apt-get install postgresql-client-11 zabbix-agent curl vim-tiny s3cmd pv azure-cli -y
 apt-get upgrade -y
 apt-get dist-upgrade -y
 apt-get autoremove -y

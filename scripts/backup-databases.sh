@@ -1,7 +1,6 @@
 #!/bin/bash
 
-set -eu
-
+set -eu 
 #######################################################################################################################################
 ####
 #### INIT
@@ -22,7 +21,7 @@ STARTTIME_GLOBAL="$SECONDS"
 CRYPT_FILE="${CRYPT_FILE:-/srv/conf/pgbackup.passphrase}"
 CRYPT_PASSWORD="${CRYPT_PASSWORD:-}"
 
-UPLOAD_TYPE="OFF"
+UPLOAD_TYPE="${UPLOAD_TYPE:-off}"
 
 S3_CFG="${S3_CFG:-/srv/conf/s3cfg}"
 
@@ -53,10 +52,6 @@ if [ "$$" == "1" ];then
       /bin/sleep infinity
       exit 0
    fi
-fi
-
-if [ -n "$1" ];then
-   exec "$@"
 fi
 
 DUMPDIR="/srv/${PG_IDENT}/dump"
@@ -102,7 +97,8 @@ sendStatus(){
     local STATUS="$1"
     echo ">>>>$STATUS<<<<"
     if [ -n "${ZABBIX_SERVER}" ];then
-      zabbix_sender -s "${ZABBIX_HOST}" -c /etc/zabbix/zabbix_agentd.conf -k postgresql.backup.globalstatus -o "$STATUS" > /dev/null
+      zabbix_sender -s "${ZABBIX_HOST}" -c /etc/zabbix/zabbix_agentd.conf \
+		-k postgresql.backup.globalstatus -o "$STATUS" > /dev/null || true
     fi
 }
 
@@ -114,13 +110,13 @@ sync_fs(){
 upload_backup_setup(){
  echo "INFO: setup backup upload"
  if [ "$UPLOAD_TYPE" = "s3" ];then
-     if ( ! s3cmd info "$BUCKET_NAME" ) ;then
+     if ! s3cmd info "$BUCKET_NAME"; then
          s3cmd mb "$BUCKET_NAME"
          return $?
      fi
      return 0
  elif [ "$UPLOAD_TYPE" = "az" ];then
-    if ( az storage container exists --name "${BUCKET_NAME}" --output table|tail -1|grep -P '^False$' &> /dev/null );then
+    if ( az storage container exists --name "${BUCKET_NAME}" --output table 2>&1|tail -1|grep -q -P '^False$' > /dev/null );then
       az storage container create --name "${BUCKET_NAME}"
     fi
  else
@@ -130,7 +126,7 @@ upload_backup_setup(){
 
 }
 upload_backup(){
- local UPLOAD_NAME="$1"
+ local UPLOAD_NAME="${1:?}"
 
  if [ "$UPLOAD_TYPE" = "s3" ];then
      S3_ADDRESS="${BUCKET_NAME}/${PG_IDENT}/${UPLOAD_NAME}"
@@ -141,10 +137,10 @@ upload_backup(){
      RET_UPLOAD="$?"
  elif [ "$UPLOAD_TYPE" = "az" ];then
     AZ_ADDRESS="${PG_IDENT}/${UPLOAD_NAME}"
-    if ( az storage blob exists  --container "${BUCKET_NAME}" --name "$AZ_ADDRESS" --output table|tail -1|grep -P '^True$');then
+    if az storage blob exists  --container "${BUCKET_NAME}" --name "$AZ_ADDRESS" --output table|tail -1|grep -q -P '^True$'; then
         return 0
     fi
-    az storage blob upload  --file "$UPLOAD_NAME" --name "$AZ_ADDRESS" --container "${BUCKET_NAME}"
+    az storage blob upload  --file "$UPLOAD_NAME" --name "$AZ_ADDRESS" --container "${BUCKET_NAME}" --output table >/dev/null
     RET_UPLOAD="$?"
  else
     echo "INFO: UPLOAD DISABLED"
@@ -175,12 +171,12 @@ if ! cd "${BACKUPDIR}" ;then
 	exit 1 
 fi
 
-if ( ! ( echo "$UPLOAD_TYPE" |grep -q -i -P '^(s3|az|off)$' ) );then
+if ! echo "$UPLOAD_TYPE" |grep -q  -P '^(s3|az|off)$'; then
    echo "Wrong backup type '$UPLOAD_TYPE', use 's3', 'az' or 'off'"
    exit 1
 fi
 
-if ( ! ( echo "$BACKUP_TYPE" |grep -q -i -P '^(custom|sql|no)$' ) );then
+if ! echo "$BACKUP_TYPE" |grep -q -i -P '^(custom|sql|no)$'; then
    echo "Wrong backup type '$BACKUP_TYPE', use 'custom', 'sql' or 'no'"
    exit 1
 fi
@@ -261,7 +257,7 @@ done
 
 if [ "$BASE_BACKUP" = "true" ];then
    echo "*** BASE BACKUP *******************************************************************************"
-     BASE_DUMPDIR="${DUMPDIR}/${TIMESTAMP}_base_backup"
+     BASE_DUMPDIR="${DUMPDIR}/base_backup_${TIMESTAMP}"
      mkdir -p "${BASE_DUMPDIR}_currently_dumping" && \
       pg_basebackup -D "${BASE_DUMPDIR}_currently_dumping" --format=tar --gzip --progress --write-recovery-conf --verbose && \
       mv -v "${BASE_DUMPDIR}_currently_dumping" "${BACKUPDIR}/$(basename "$BASE_DUMPDIR")"
@@ -332,7 +328,6 @@ if [ -f "${CRYPT_FILE}" ];then
      fi
   done < <( find "${BACKUPDIR}" -type d -name "*_base_backup" -print0 )
 
-
 fi
 
 sync_fs
@@ -347,7 +342,7 @@ while IFS= read -r -d $'\0' FILE;
 do
    STARTTIME="$SECONDS"
 
-   upload_backup "$( basename "${UPLOAD_FILE}" )"
+   upload_backup "$(basename "$FILE")"
    RET="$?"
 
    DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"
@@ -357,7 +352,7 @@ do
 
    else
         FAILED="$((FAILED + 1))"
-        sendStatus "ERROR: FAILED TO UPLOADED FILE '$FILE' after $DURATION minutes"
+        sendStatus "ERROR: FAILED TO UPLOAD FILE '$FILE' after $DURATION minutes"
    fi
 done < <( find "${BACKUPDIR}" -type f  -name "*.gpg" -print0)
 
@@ -366,13 +361,13 @@ echo "*** REMOVE OUTDATED BACKUPS **********************************************
 
 if ( echo -n "$MAXAGE_LOCAL"|grep -P -q '^\d+$' ) && [ "$MAXAGE_LOCAL" != "0" ] ;then
    echo "INFO: DELETING OUTDATED BACKUP ON PV (OLDER THAN $MAXAGE_LOCAL DAYS)"
-	find "${BACKUPDIR}" -type f -name "*.uploaded" -mtime "+${MAXAGE_LOCAL}" -exec rm -fv {} \;
-	find "${BACKUPDIR}" -type f -name "*.custom.gz*" -mtime "+${MAXAGE_LOCAL}" -exec rm -fv {} \;
-	find "${BACKUPDIR}" -type f -name "*.sql.gz*" -mtime "+${MAXAGE_LOCAL}" -exec rm -fv {} \;
+   find "${BACKUPDIR}" -type f -name "*.uploaded" -mtime "+${MAXAGE_LOCAL}" -exec rm -fv {} \;
+   find "${BACKUPDIR}" -type f -name "*.custom.gz*" -mtime "+${MAXAGE_LOCAL}" -exec rm -fv {} \;
+   find "${BACKUPDIR}" -type f -name "*.sql.gz*" -mtime "+${MAXAGE_LOCAL}" -exec rm -fv {} \;
    find "${BACKUPDIR}" -name "*_base_backup*" -mtime "+${MAXAGE_LOCAL}" -exec rm -frv {} \;
-	find "${BACKUPDIR}" -type f -name "*_currently_encrypting.gpg" -mtime +1 -exec rm -fv {} \;
-	find "${DUMPDIR}" -type f -name "*_currently_dumping.sql.gz" -mtime +1 -exec rm -fv {} \;
-	find "${DUMPDIR}" -type f -name "*_currently_dumping.custom.gz" -mtime +1 -exec rm -fv {} \;
+   find "${BACKUPDIR}" -type f -name "*_currently_encrypting.gpg" -mtime +1 -exec rm -fv {} \;
+   find "${DUMPDIR}" -type f -name "*_currently_dumping.sql.gz" -mtime +1 -exec rm -fv {} \;
+   find "${DUMPDIR}" -type f -name "*_currently_dumping.custom.gz" -mtime +1 -exec rm -fv {} \;
    find "${DUMPDIR}" -type d -name "*_currently_dumping" -mtime +1 -exec rm -frv {} \;
    echo "TOTAL AMOUNT OF BACKUPS ON PV : $( du -scmh -- *.gz *.gpg|awk '/total/{print $1}')"
    sync_fs
