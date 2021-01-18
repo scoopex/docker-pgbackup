@@ -8,8 +8,17 @@ set -eu
 
 export PATH="/scripts/:$PATH"
 
-STARTTIME_GLOBAL="$SECONDS"
 ENV_FILE="${ENV_FILE:-/srv/conf/pgbackup.env}"
+
+if [ -f "${ENV_FILE}" ];then
+   echo "sourcing ${ENV_FILE}"
+   # shellcheck source=/dev/null
+   source "${ENV_FILE}"
+else
+   echo "environment file '${ENV_FILE}' does not exist"
+fi
+
+STARTTIME_GLOBAL="$SECONDS"
 CRYPT_FILE="${CRYPT_FILE:-/srv/conf/pgbackup.passphrase}"
 CRYPT_PASSWORD="${CRYPT_PASSWORD:-}"
 
@@ -24,21 +33,12 @@ BASE_BACKUP="${BASE_BACKUP:-false}"
 
 PG_IDENT="${PG_IDENT:-$PGHOST}"
 
-if [ -f "${ENV_FILE}" ];then
-   echo "sourcing ${ENV_FILE}"
-   # shellcheck source=/dev/null
-   source "${ENV_FILE}"
-else
-   echo "environment file '${ENV_FILE}' does not exist"
-fi
-
 MAXAGE_LOCAL="${MAXAGE_LOCAL:-3}"
 MAXAGE_REMOTE="${MAXAGE_REMOTE:-30}"
 PGUSER="${POSTGRESQL_USERNAME:?Postgres Username}"
 PGPORT="${POSTGRESQL_PORT:-5432}"
 PGHOST="${POSTGRESQL_HOST:?postgres host}"
 PGPASSWORD="${POSTGRESQL_PASSWORD:?postgres superuser password}"
-
 
 if [[ -n "$CRYPT_PASSWORD"  ]];then
    CRYPT_FILE="$HOME/.crypt_password"
