@@ -1,11 +1,17 @@
 #!/bin/bash
 
+#######################################################################################################################################
+####
+#### INIT
+
 export PATH="/scripts/:$PATH"
 
 STARTTIME_GLOBAL="$SECONDS"
 ENV_FILE="${ENV_FILE:-/srv/conf/pgbackup.env}"
 CRYPT_FILE="${CRYPT_FILE:-/srv/conf/pgbackup.passphrase}"
 CRYPT_PASSWORD="${CRYPT_PASSWORD:-}"
+
+UPLOAD_TYPE="OFF"
 
 S3_CFG="${S3_CFG:-/srv/conf/s3cfg}"
 
@@ -25,7 +31,7 @@ else
 fi
 
 MAXAGE_PV="${MAXAGE_PV:-3}"
-MAXAGE_S3="${MAXAGE_S3:-30}"
+MAXAGE_REMOTE="${MAXAGE_REMOTE:-30}"
 PGUSER="${POSTGRESQL_USERNAME:?Postgres Username}"
 PGPORT="${POSTGRESQL_PORT:-5432}"
 PGHOST="${POSTGRESQL_HOST:?postgres host}"
@@ -34,7 +40,6 @@ PGPASSWORD="${POSTGRESQL_PASSWORD:?postgres superuser password}"
 
 if [[ -n "$CRYPT_PASSWORD"  ]];then
    CRYPT_FILE="$HOME/.crypt_password"
-   trap 'rm -f $CRYPT_FILE' TERM INT EXIT
    echo -n "$CRYPT_PASSWORD" > "$CRYPT_FILE"
 fi
 
@@ -61,19 +66,22 @@ export PGHOST
 export PGPASSWORD
 
 echo "**********************************************************************"
-echo "** ENV_FILE      : $ENV_FILE"
-echo "** CRYPT_FILE    : $CRYPT_FILE"
-echo "** DUMPDIR       : $DUMPDIR"
-echo "** BACKUPDIR     : $BACKUPDIR"
-echo "** MAXAGE_PV     : $MAXAGE_PV days"
-echo "** MAXAGE_S3     : $MAXAGE_S3 days"
-echo "** BACKUP_TYPE   : $BACKUP_TYPE"
-echo "** BASE_BACKUP   : $BASE_BACKUP"
+echo "** ENV_FILE       : $ENV_FILE"
+echo "** CRYPT_FILE     : $CRYPT_FILE"
+echo "** DUMPDIR        : $DUMPDIR"
+echo "** BACKUPDIR      : $BACKUPDIR"
+echo "** MAXAGE_PV      : $MAXAGE_PV days"
+echo "** MAXAGE_REMOTE  : $MAXAGE_REMOTE days"
+echo "** UPLOAD_TYPE    : $UPLOAD_TYPE"
+echo "** BACKUP_TYPE    : $BACKUP_TYPE"
+echo "** BASE_BACKUP    : $BASE_BACKUP"
 echo "**"
-echo "** PGUSER        : $PGUSER"
+echo "** PGUSER         : $PGUSER"
 echo "**"
-echo "** ZABBIX_SERVER : $ZABBIX_SERVER" 
-echo "** ZABBIX_HOST   : $ZABBIX_HOST"
+echo "** ZABBIX_SERVER  : $ZABBIX_SERVER" 
+echo "** ZABBIX_HOST    : $ZABBIX_HOST"
+echo "**"
+echo "** S3_BUCKET_NAME : $S3_BUCKET_NAME"
 echo "**********************************************************************"
 
 
@@ -84,6 +92,10 @@ fi
 
 TIMESTAMP="$(date --date="today" "+%Y-%m-%d_%H-%M-%S")"
 
+#######################################################################################################################################
+####
+#### HELPER FUNCTIONS
+
 sendStatus(){
     local STATUS="$1"
     echo ">>>>$STATUS<<<<"
@@ -91,6 +103,58 @@ sendStatus(){
       zabbix_sender -s "${ZABBIX_HOST}" -c /etc/zabbix/zabbix_agentd.conf -k postgresql.backup.globalstatus -o "$STATUS" > /dev/null
     fi
 }
+
+sync_fs(){
+   echo "INFO: PERFORMING FS SYNC NOW"
+   sync
+}
+
+upload_backup_setup(){
+ echo "INFO: setup backup upload"
+ if [ "$UPLOAD_TYPE" = "s3" ];then
+     if ( ! s3cmd info "$S3_BUCKET_NAME" ) ;then
+         s3cmd mb "$S3_BUCKET_NAME"
+         return $?
+     fi
+     return 0
+ elif [ "$UPLOAD_TYPE" = "az" ];then
+    echo "ERROR: NOT IMPLEMENTED"
+    exit 1
+ else
+    echo "INFO: UPLOAD DISABLED"
+    return 0
+ fi
+
+}
+upload_backup(){
+ local PG_IDENT="$1"
+ local UPLOAD_NAME="$2"
+
+ if [ "$UPLOAD_TYPE" = "s3" ];then
+     S3_ADDRESS="${S3_BUCKET_NAME}/${PG_IDENT}/${UPLOAD_NAME}"
+     if ( s3cmd info "$S3_ADDRESS" &> /dev/null );then
+        return 0
+     fi
+     s3cmd put "$FILE" "$S3_ADDRESS"
+     RET_UPLOAD="$?"
+ elif [ "$UPLOAD_TYPE" = "az" ];then
+    echo "ERROR: NOT IMPLEMENTED"
+    exit 1
+ else
+    echo "INFO: UPLOAD DISABLED"
+    return 0
+ fi
+
+ if [ "$RET_UPLOAD" = "0" ];then
+    echo "trimming '$FILE' to 0 bytes to save filesystem space"
+    echo -n > "$FILE"
+ fi
+ return "$RET_UPLOAD"
+}
+
+#######################################################################################################################################
+####
+#### MAIN
 
 if [ ! -d "$BACKUPDIR" ];then
     mkdir -p "$BACKUPDIR"
@@ -105,8 +169,13 @@ if ! cd "${BACKUPDIR}" ;then
 	exit 1 
 fi
 
-if ( ! ( echo "$BACKUP_TYPE" |grep -q -P '^(custom|sql|no)$' ) );then
-   echo "Wrong backup type '$BACKUP_TYPE', use 'cusom', 'sql' or 'no'"
+if ( ! ( echo "$UPLOAD_TYPE" |grep -q -i -P '^(s3|az|off)$' ) );then
+   echo "Wrong backup type '$UPLOAD_TYPE', use 's3', 'az' or 'off'"
+   exit 1
+fi
+
+if ( ! ( echo "$BACKUP_TYPE" |grep -q -i -P '^(custom|sql|no)$' ) );then
+   echo "Wrong backup type '$BACKUP_TYPE', use 'custom', 'sql' or 'no'"
    exit 1
 fi
 
@@ -201,8 +270,7 @@ if [ "$BASE_BACKUP" = "true" ];then
      fi
 fi
 
-echo "INFO: PERFORMING FS SYNC NOW"
-sync
+sync_fs
 
 DURATION="$(( $(( SECONDS - STARTTIME_GLOBAL )) / 60 ))"
 if [ "$FAILED" -gt 0 ];then 
@@ -261,51 +329,36 @@ if [ -f "${CRYPT_FILE}" ];then
 
 fi
 
+sync_fs
 
-echo "INFO: PERFORMING FS SYNC NOW"
-sync
+ 
+echo "*** UPLOAD BACKUPS ******************************************************************************"
+sendStatus "INFO: UPLOADING ENCRYPTED FILES NOW"
 
-if [ -n "$S3_BUCKET_NAME" ];then
-   echo "*** CHECKING S3 BUCKET **************************************************************************"
-   if ( ! s3cmd info "$S3_BUCKET_NAME" ) ;then
-      s3cmd mb "$S3_BUCKET_NAME"
+upload_backup_setup
+
+while IFS= read -r -d $'\0' FILE;
+do
+   STARTTIME="$SECONDS"
+
+   upload_backup "${PG_IDENT}" "$( basename "${UPLOAD_FILE}" )"
+   RET="$?"
+
+   DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"
+   if [ "$RET" == "0" ];then
+        sendStatus "INFO: SUCESSFULLY UPLOADED FILE '$FILE' after $DURATION minutes"
+        SUCCESSFUL="$(( SUCCESSFUL + 1))"
+
+   else
+        FAILED="$((FAILED + 1))"
+        sendStatus "ERROR: FAILED TO UPLOADED FILE '$FILE' after $DURATION minutes"
    fi
-
-   echo "*** UPLOAD BACKUPS ******************************************************************************"
-   sendStatus "INFO: UPLOADING ENCRYPTED FILES NOW"
-
-   while IFS= read -r -d $'\0' FILE;
-   do
-     STARTTIME="$SECONDS"
-
-     S3_ADDRESS="${S3_BUCKET_NAME}/${PG_IDENT}/$( basename "${FILE}" )"
-     if ( s3cmd info "$S3_ADDRESS" &> /dev/null );then
-        continue
-     fi
-     s3cmd put "$FILE" "$S3_ADDRESS"
-     RET="$?"
-
-     if [ "$RET" = "0" ];then
-        echo "trimming '$FILE' to save filesystem space"
-        echo > "$FILE"
-     fi
-
-     DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"
-     if [ "$RET" == "0" ];then
-          sendStatus "INFO: SUCESSFULLY UPLOADED FILE '$FILE' after $DURATION minutes"
-          SUCCESSFUL="$(( SUCCESSFUL + 1))"
-
-     else
-          FAILED="$((FAILED + 1))"
-          sendStatus "ERROR: FAILED TO UPLOADED FILE '$FILE' after $DURATION minutes"
-     fi
-  done < <( find "${BACKUPDIR}" -type f  -name "*.gpg" -print0)
-fi
+done < <( find "${BACKUPDIR}" -type f  -name "*.gpg" -print0)
 
 
 echo "*** REMOVE OUTDATED BACKUPS **********************************************************************"
 
-if ( echo -n "$MAXAGE_PV"|grep -P -q '^\d+$' );then
+if ( echo -n "$MAXAGE_PV"|grep -P -q '^\d+$' ) && [ "$MAXAGE_PV" != "0" ] ;then
    echo "INFO: DELETING OUTDATED BACKUP ON PV (OLDER THAN $MAXAGE_PV DAYS)"
 	find "${BACKUPDIR}" -type f -name "*.uploaded" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
 	find "${BACKUPDIR}" -type f -name "*.custom.gz*" -mtime "+${MAXAGE_PV}" -exec rm -fv {} \;
@@ -315,21 +368,20 @@ if ( echo -n "$MAXAGE_PV"|grep -P -q '^\d+$' );then
 	find "${DUMPDIR}" -type f -name "*_currently_dumping.sql.gz" -mtime +1 -exec rm -fv {} \;
 	find "${DUMPDIR}" -type f -name "*_currently_dumping.custom.gz" -mtime +1 -exec rm -fv {} \;
    find "${DUMPDIR}" -type d -name "*_currently_dumping" -mtime +1 -exec rm -frv {} \;
-   echo "INFO: PERFORMING FS SYNC NOW"
    echo "TOTAL AMOUNT OF BACKUPS ON PV : $( du -scmh -- *.gz *.gpg|awk '/total/{print $1}')"
-   sync
+   sync_fs
 else
 	echo "Age not correctly defined, '$MAXAGE_PV'"
 	exit 1 
 fi
 
-if [[ -n "$MAXAGE_S3" ]] && [[ -n "$S3_BUCKET_NAME" ]];then
-      echo "INFO: DELETING OUTDATED BACKUP ON S3 (OLDER THAN $MAXAGE_S3 DAYS)"
+if [[ -n "$MAXAGE_REMOTE" ]] && [[ "$MAXAGE_REMOTE" = "0" ]] && [[ -n "$S3_BUCKET_NAME" ]] && [[ "$UPLOAD_TYPE" == "s3" ]];then
+      echo "INFO: DELETING OUTDATED BACKUP ON S3 (OLDER THAN $MAXAGE_REMOTE DAYS)"
       for DBNAME in $DATABASES;
       do
         echo "INFO: PRUNING OUTDATED BACKUPS FOR DATABASE $DBNAME IN $S3_BUCKET_NAME"
-        echo "+s3prune.sh \"$S3_BUCKET_NAME\" \"${MAXAGE_S3} days ago\" \".*/${PG_IDENT}/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg\""
-        s3prune.sh "$S3_BUCKET_NAME" "${MAXAGE_S3} days ago" ".*/${PG_IDENT}/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg"
+        echo "+s3prune.sh \"$S3_BUCKET_NAME\" \"${MAXAGE_REMOTE} days ago\" \".*/${PG_IDENT}/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg\""
+        s3prune.sh "$S3_BUCKET_NAME" "${MAXAGE_REMOTE} days ago" ".*/${PG_IDENT}/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg"
       done
 fi
 

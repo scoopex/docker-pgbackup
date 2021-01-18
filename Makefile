@@ -1,7 +1,7 @@
 SHELL=/bin/bash
 
 VERSION = $(shell git describe --abbrev=0 --tags)
-IMAGE_REPO = scoopex666
+IMAGE_REPO = getflip
 IMAGE_NAME = pgbackup
 
 build:
