@@ -120,7 +120,7 @@ upload_backup_setup(){
      fi
      return 0
  elif [ "$UPLOAD_TYPE" = "az" ];then
-    if ( az storage container exists --name test --output table|tail -1|grep -P "^False$" &> /dev/null );then
+    if ( az storage container exists --name "${BUCKET_NAME}" --output table|tail -1|grep -P "^False$" &> /dev/null );then
       az storage container create --name "${BUCKET_NAME}"
     fi
  else
