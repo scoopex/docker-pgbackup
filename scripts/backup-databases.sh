@@ -29,8 +29,9 @@ ZABBIX_SERVER="${ZABBIX_SERVER:-}"
 ZABBIX_HOST="${ZABBIX_HOST:-}"
 BACKUP_TYPE="${BACKUP_TYPE:-custom}"
 BASE_BACKUP="${BASE_BACKUP:-false}"
+BUCKET_NAME="${BUCKET_NAME:-backup}"
 
-PG_IDENT="${PG_IDENT:-$PGHOST}"
+PG_IDENT="${PG_IDENT:-${PGHOST:-}}"
 
 MAXAGE_LOCAL="${MAXAGE_LOCAL:-3}"
 MAXAGE_REMOTE="${MAXAGE_REMOTE:-30}"
@@ -38,6 +39,7 @@ PGUSER="${POSTGRESQL_USERNAME:?Postgres Username}"
 PGPORT="${POSTGRESQL_PORT:-5432}"
 PGHOST="${POSTGRESQL_HOST:?postgres host}"
 PGPASSWORD="${POSTGRESQL_PASSWORD:?postgres superuser password}"
+
 
 if [[ -n "$CRYPT_PASSWORD"  ]];then
    CRYPT_FILE="$HOME/.crypt_password"
@@ -157,6 +159,10 @@ upload_backup(){
 #######################################################################################################################################
 ####
 #### MAIN
+
+if [ -n "${1:-}" ];then
+   exec "$@"
+fi
 
 if [ ! -d "$BACKUPDIR" ];then
     mkdir -p "$BACKUPDIR"
