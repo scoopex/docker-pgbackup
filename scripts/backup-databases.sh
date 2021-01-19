@@ -52,7 +52,7 @@ ln -snf "$S3_CFG" /home/pgbackup/.s3cfg
 if [ "$$" == "1" ];then
    if  [ "${MANUAL:-false}" == "true" ] || (hostname|grep -q -- "-manual-") ;then
       echo "MANUAL MODE, SLEEPING FOREVER : $(date) - SEND ME A SIGTERM TO TERMINATE"
-      /bin/sleep infinity
+      cat
       exit 0
    fi
 fi
