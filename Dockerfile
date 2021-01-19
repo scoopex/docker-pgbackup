@@ -13,4 +13,5 @@ ADD /scripts /scripts
 RUN /bin/bash /tmp/setup/10_phase_scripts_added.sh
 
 USER pgbackup
+WORKDIR /scripts
 ENTRYPOINT [ "/scripts/backup-databases.sh" ]

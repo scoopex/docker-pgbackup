@@ -33,13 +33,12 @@ echo "ROOT PASSWORD : $ROOTPW" >&2
 groupadd -g 1000 pgbackup
 useradd -g pgbackup -G pgbackup -u 1000 -m -s /bin/bash pgbackup
 
-echo 'export PATH="/scripts:$PATH"' >> /home/pgbackup/.bashrc
-echo 'cd /srv' >> /home/pgbackup/.bashrc
 chown -R pgbackup:pgbackup /home/pgbackup
 
 echo "set nocompatible" > /home/pgbackup/.vimrc
 
-cat >/home/pgbackup/.bashrc <<'EOF'
+cat >>/home/pgbackup/.bashrc <<'EOF'
+export PATH="/scripts:$PATH"
 export PGUSER="${POSTGRESQL_USERNAME:?Postgres Username}"
 export PGPORT="${POSTGRESQL_PORT:-5432}"
 export PGHOST="${POSTGRESQL_HOST:?postgres host}"

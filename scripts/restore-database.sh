@@ -7,8 +7,8 @@ abort_it(){
   local MSG="$1"
   echo
   echo "$MSG"
-  read -r -p "ABORT (y/n) : " ASK
-  if [ "$ASK" = "n" ];then
+  read -r -p "Continue (y/n) : " ASK
+  if [ "$ASK" = "y" ];then
      return
   fi
   exit 1
@@ -74,12 +74,6 @@ if ( echo "$FILE"|grep -P ".+\.gpg" );then
 fi
 
 echo "INFO: ALLOWING CONNECTIONS AGAIN"
-(
-cat <<EOF
-UPDATE pg_database SET datallowconn = 'true' WHERE datname = '${DATABASE}';
-EOF
-) | psql 
-
 
 pg_restore -j8 --verbose --exit-on-error --clean --if-exists -Fc -d "${DATABASE}" "${FILE}"
 RET="$?"
@@ -89,6 +83,7 @@ if [ "$RET" != "0" ];then
    exit $RET
 else
    echo "INFO: RESTORE SUCCESSFUL AFTER $SECONDS SECONDS"
+   psql -c "UPDATE pg_database SET datallowconn = 'true' WHERE datname = '${DATABASE}';"
    exit 0
 fi
 
