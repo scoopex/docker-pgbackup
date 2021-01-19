@@ -53,7 +53,7 @@ if [ "$$" == "1" ];then
    if  [ "${MANUAL:-false}" == "true" ] || (hostname|grep -q -- "-manual-") ;then
       echo "MANUAL MODE, SLEEPING FOREVER : $(date) - SEND ME A SIGTERM TO TERMINATE"
       echo -n "Sleeping "
-      while True; do
+      while true; do
          echo -n "."
          sleep 2
       done
