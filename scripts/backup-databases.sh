@@ -413,7 +413,7 @@ if ( echo -n "$maxage_days_local"|grep -P -q '^\d+$' ) && [ "$maxage_days_local"
    find "${dump_dir}" -type f -name "*_currently_dumping.sql.gz" -mtime +1 -exec rm -fv {} \;
    find "${dump_dir}" -type f -name "*_currently_dumping.custom.gz" -mtime +1 -exec rm -fv {} \;
    find "${dump_dir}" -type d -name "*_currently_dumping" -mtime +1 -exec rm -frv {} \;
-   echo "TOTAL AMOUNT OF BACKUPS ON PV : $( du -scmh -- *.gz *.gpg 2>/dev/null|awk '/total/{print $1}')"
+   echo "total amount of backups on pv : $( du -scmh -- *.gz *.gpg 2>/dev/null|awk '/total/{print $1}')"
    sync_fs
 else
    log "error: age not correctly defined, '$maxage_days_local'"
