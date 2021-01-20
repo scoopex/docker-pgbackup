@@ -91,6 +91,7 @@ function upload_backup_setup(){
      fi
      return 0
  elif [ "$upload_type" = "az" ];then
+    # todo: probably use --if-none-match for upload, that is probably faster, https://docs.microsoft.com/en-us/cli/azure/storage/blob?view=azure-cli-latest#az_storage_blob_upload
     if ( az storage container exists --name "${bucket_name}" --output table 2>&1|tail -1|grep -q -P '^False$' > /dev/null );then
       az storage container create --name "${bucket_name}"
       return $?
