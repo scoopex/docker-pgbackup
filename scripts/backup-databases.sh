@@ -8,50 +8,133 @@ set -eu
 
 export PATH="/scripts/:$PATH"
 
-ENV_FILE="${ENV_FILE:-/srv/conf/pgbackup.env}"
+env_file="${ENV_FILE:-/srv/conf/pgbackup.env}"
 
-if [ -f "${ENV_FILE}" ];then
-   echo "sourcing ${ENV_FILE}"
+if [ -f "${env_file}" ];then
+   echo "sourcing ${env_file}"
    # shellcheck source=/dev/null
-   source "${ENV_FILE}"
+   source "${env_file}"
 else
-   echo "environment file '${ENV_FILE}' does not exist"
+   echo "environment file '${env_file}' does not exist"
 fi
 
-STARTTIME_GLOBAL="$SECONDS"
-CRYPT_FILE="${CRYPT_FILE:-/srv/conf/pgbackup.passphrase}"
-CRYPT_PASSWORD="${CRYPT_PASSWORD:-}"
+startime_backup="$SECONDS"
+crypt_file="${CRYPT_FILE:-/srv/conf/pgbackup.passphrase}"
+crypt_password="${CRYPT_PASSWORD:-}"
 
-UPLOAD_TYPE="${UPLOAD_TYPE:-off}"
+upload_type="${UPLOAD_TYPE:-off}"
 
-S3_CFG="${S3_CFG:-/srv/conf/s3cfg}"
+s3_cfg="${S3_CFG:-/srv/conf/s3cfg}"
 
-ZABBIX_SERVER="${ZABBIX_SERVER:-}"
-ZABBIX_HOST="${ZABBIX_HOST:-}"
-BACKUP_TYPE="${BACKUP_TYPE:-custom}"
-BASE_BACKUP="${BASE_BACKUP:-false}"
-BUCKET_NAME="${BUCKET_NAME:-backup}"
+zabbix_server="${ZABBIX_SERVER:-}"
+zabbix_host="${ZABBIX_HOST:-}"
+backup_type="${BACKUP_TYPE:-custom}"
+base_backup="${BASE_BACKUP:-false}"
+bucket_name="${BUCKET_NAME:-backup}"
 
-PG_IDENT="${PG_IDENT:-${PGHOST:-}}"
+pg_ident="${PG_IDENT:-${PGHOST:-}}"
 
-MAXAGE_LOCAL="${MAXAGE_LOCAL:-3}"
-MAXAGE_REMOTE="${MAXAGE_REMOTE:-30}"
+maxage_days_local="${MAXAGE_LOCAL:-3}"
+maxage_days_remote="${MAXAGE_REMOTE:-30}"
+
+# Environment variables for the postgres clients
 PGUSER="${POSTGRESQL_USERNAME:?Postgres Username}"
 PGPORT="${POSTGRESQL_PORT:-5432}"
 PGHOST="${POSTGRESQL_HOST:?postgres host}"
 PGPASSWORD="${POSTGRESQL_PASSWORD:?postgres superuser password}"
 
 
-if [[ -n "$CRYPT_PASSWORD"  ]];then
-   CRYPT_FILE="$HOME/.crypt_password"
-   echo -n "$CRYPT_PASSWORD" > "$CRYPT_FILE"
+if [[ -n "$crypt_password"  ]];then
+   crypt_file="$HOME/.crypt_password"
+   echo -n "$crypt_password" > "$crypt_file"
 fi
 
-ln -snf "$S3_CFG" /home/pgbackup/.s3cfg
 
+
+#######################################################################################################################################
+####
+#### HELPER FUNCTIONS
+
+
+function log(){
+    local text="$1"
+    if (echo "$text" |grep -q -P "failed|error:" );then
+    	printf '\e[1;31m%-6s\e[m\n' "$text"
+    elif (echo "$text" |grep -q -P "successfully|ok:" );then
+    	printf '\e[1;32m%-6s\e[m\n' "$text"
+    else
+    	printf '\e[1;34m%-6s\e[m\n' "$text"
+    fi
+}
+
+function send_status(){
+    local status="$1"
+    log "$status" 
+    if [ -n "${zabbix_server}" ];then
+      zabbix_sender -s "${zabbix_host}" -c /etc/zabbix/zabbix_agentd.conf \
+		-k postgresql.backup.globalstatus -o "$status" > /dev/null || true
+    fi
+}
+
+function sync_fs(){
+   echo "performing fs sync now"
+   sync
+}
+
+function upload_backup_setup(){
+ echo "setup backup upload"
+ if [ "$upload_type" = "s3" ];then
+     ln -snf "$s3_cfg" /home/pgbackup/.s3cfg
+     if ! s3cmd info "$bucket_name"; then
+         s3cmd mb "$bucket_name"
+         return $?
+     fi
+     return 0
+ elif [ "$upload_type" = "az" ];then
+    if ( az storage container exists --name "${bucket_name}" --output table 2>&1|tail -1|grep -q -P '^False$' > /dev/null );then
+      az storage container create --name "${bucket_name}"
+      return $?
+    fi
+    return 0
+ else
+    echo "upload disabled"
+    return 0
+ fi
+}
+
+function upload_backup(){
+ local upload_name="${1:?}"
+ if [ "$upload_type" = "s3" ];then
+     s3_address="${bucket_name}/${pg_ident}/${upload_name}"
+     if ( s3cmd info "$s3_address" &> /dev/null );then
+        return 2
+     fi
+     s3cmd put "$upload_name" "$s3_address"
+     ret_upload="$?"
+ elif [ "$upload_type" = "az" ];then
+    az_address="${pg_ident}/${upload_name}"
+    if az storage blob exists  --container "${bucket_name}" --name "$az_address" --output table|tail -1|grep -q -P '^True$'; then
+        return 2
+    fi
+    az storage blob upload  --file "$upload_name" --name "$az_address" --container "${bucket_name}" --output table >/dev/null
+    ret_upload="$?"
+ fi
+
+ if [ "$ret_upload" != "0" ];then
+	return 1
+ fi
+ return 0
+}
+
+#######################################################################################################################################
+####
+#### MAIN
+
+
+# stop here if script is launced in a manual pod to allow a interactive shell
 if [ "$$" == "1" ];then
    if  [ "${MANUAL:-false}" == "true" ] || (hostname|grep -q -- "-manual-") ;then
-      echo "MANUAL MODE, SLEEPING FOREVER : $(date) - SEND ME A SIGTERM TO TERMINATE"
+      echo "manual mode, sleeping forever : $(date) - send me a sigterm to terminate"
       echo -n "Sleeping "
       while true; do
          echo -n "."
@@ -61,146 +144,85 @@ if [ "$$" == "1" ];then
    fi
 fi
 
-DUMPDIR="/srv/dump"
-BACKUPDIR="/srv/backup"
+dump_dir="/srv/dump"
+backup_dir="/srv/backup"
 
 export PGUSER
 export PGPORT
 export PGHOST
 export PGPASSWORD
 
-echo "**********************************************************************"
-echo "** ENV_FILE       : $ENV_FILE"
-echo "** CRYPT_FILE     : $CRYPT_FILE"
-echo "** DUMPDIR        : $DUMPDIR"
-echo "** BACKUPDIR      : $BACKUPDIR"
-echo "** MAXAGE_LOCAL   : $MAXAGE_LOCAL days"
-echo "** MAXAGE_REMOTE  : $MAXAGE_REMOTE days"
-echo "** UPLOAD_TYPE    : $UPLOAD_TYPE"
-echo "** BACKUP_TYPE    : $BACKUP_TYPE"
-echo "** BASE_BACKUP    : $BASE_BACKUP"
-echo "**"
-echo "** PGUSER         : $PGUSER"
-echo "**"
-echo "** ZABBIX_SERVER  : $ZABBIX_SERVER" 
-echo "** ZABBIX_HOST    : $ZABBIX_HOST"
-echo "**"
-echo "** BUCKET_NAME    : $BUCKET_NAME"
-echo "**********************************************************************"
+data="$(cat <<EOF
+**********************************************************************
+** ENV_FILE       : $env_file
+** CRYPT_FILE     : $crypt_file
+** DUMP_DIR       : $dump_dir
+** BACKUPDIR      : $backup_dir
+** MAXAGE_LOCAL   : $maxage_days_local days
+** MAXAGE_REMOTE  : $maxage_days_remote days
+** UPLOAD_TYPE    : $upload_type
+** BACKUP_TYPE    : $backup_type
+** BASE_BACKUP    : $base_backup
+**
+** PGUSER         : $PGUSER
+** PGHOST         : $PGHOST
+** PGPORT         : $PGPORT
+**
+** ZABBIX_SERVER  : $zabbix_server 
+** ZABBIX_HOST    : $zabbix_host
+**
+** BUCKET_NAME    : $bucket_name
+**********************************************************************
+EOF
+)"
+log "$data"
+echo
 
 
-if [ -z "$BACKUPDIR" ] || [ -z "$MAXAGE_LOCAL" ];then
+if [ -z "$backup_dir" ] || [ -z "$maxage_days_local" ];then
    echo "ERROR: missing config params"
 	exit 1
 fi
 
-TIMESTAMP="$(date --date="today" "+%Y-%m-%d_%H-%M-%S")"
+timestamp_isoish="$(date --date="today" "+%Y-%m-%d_%H-%M-%S")"
 
-#######################################################################################################################################
-####
-#### HELPER FUNCTIONS
-
-sendStatus(){
-    local STATUS="$1"
-    echo ">>>>$STATUS<<<<"
-    if [ -n "${ZABBIX_SERVER}" ];then
-      zabbix_sender -s "${ZABBIX_HOST}" -c /etc/zabbix/zabbix_agentd.conf \
-		-k postgresql.backup.globalstatus -o "$STATUS" > /dev/null || true
-    fi
-}
-
-sync_fs(){
-   echo "INFO: PERFORMING FS SYNC NOW"
-   sync
-}
-
-upload_backup_setup(){
- echo "INFO: setup backup upload"
- if [ "$UPLOAD_TYPE" = "s3" ];then
-     if ! s3cmd info "$BUCKET_NAME"; then
-         s3cmd mb "$BUCKET_NAME"
-         return $?
-     fi
-     return 0
- elif [ "$UPLOAD_TYPE" = "az" ];then
-    if ( az storage container exists --name "${BUCKET_NAME}" --output table 2>&1|tail -1|grep -q -P '^False$' > /dev/null );then
-      az storage container create --name "${BUCKET_NAME}"
-    fi
- else
-    echo "INFO: UPLOAD DISABLED"
-    return 0
- fi
-
-}
-upload_backup(){
- local UPLOAD_NAME="${1:?}"
-
- if [ "$UPLOAD_TYPE" = "s3" ];then
-     S3_ADDRESS="${BUCKET_NAME}/${PG_IDENT}/${UPLOAD_NAME}"
-     if ( s3cmd info "$S3_ADDRESS" &> /dev/null );then
-        return 0
-     fi
-     s3cmd put "$FILE" "$S3_ADDRESS"
-     RET_UPLOAD="$?"
- elif [ "$UPLOAD_TYPE" = "az" ];then
-    AZ_ADDRESS="${PG_IDENT}/${UPLOAD_NAME}"
-    if az storage blob exists  --container "${BUCKET_NAME}" --name "$AZ_ADDRESS" --output table|tail -1|grep -q -P '^True$'; then
-        return 0
-    fi
-    az storage blob upload  --file "$UPLOAD_NAME" --name "$AZ_ADDRESS" --container "${BUCKET_NAME}" --output table >/dev/null
-    RET_UPLOAD="$?"
- else
-    echo "INFO: UPLOAD DISABLED"
-    return 0
- fi
-
- if [ "$RET_UPLOAD" = "0" ];then
-    echo "trimming '$FILE' to 0 bytes to save filesystem space"
-    echo -n > "$FILE"
- fi
- return "$RET_UPLOAD"
-}
-
-#######################################################################################################################################
-####
-#### MAIN
 
 if [ -n "${1:-}" ];then
    exec "$@"
 fi
 
-if [ ! -d "$BACKUPDIR" ];then
-    mkdir -p "$BACKUPDIR"
+if [ ! -d "$backup_dir" ];then
+    mkdir -p "$backup_dir"
 fi
 
-if [ ! -d "$DUMPDIR" ];then
-    mkdir -p "$DUMPDIR"
+if [ ! -d "$dump_dir" ];then
+    mkdir -p "$dump_dir"
 fi
 
-if ! cd "${BACKUPDIR}" ;then
-   echo "Unable to change to dir '${BACKUPDIR}'"
+if ! cd "${backup_dir}" ;then
+   echo "Unable to change to dir '${backup_dir}'"
 	exit 1 
 fi
 
-if ! echo "$UPLOAD_TYPE" |grep -q  -P '^(s3|az|off)$'; then
-   echo "Wrong backup type '$UPLOAD_TYPE', use 's3', 'az' or 'off'"
+if ! echo "$upload_type" |grep -q  -P '^(s3|az|off)$'; then
+   echo "Wrong backup type '$upload_type', use 's3', 'az' or 'off'"
    exit 1
 fi
 
-if ! echo "$BACKUP_TYPE" |grep -q -i -P '^(custom|sql|no)$'; then
-   echo "Wrong backup type '$BACKUP_TYPE', use 'custom', 'sql' or 'no'"
+if ! echo "$backup_type" |grep -q -i -P '^(custom|sql|no)$'; then
+   echo "Wrong backup type '$backup_type', use 'custom', 'sql' or 'no'"
    exit 1
 fi
 
-sendStatus "INFO: STARTING DATABASE BACKUP"
+send_status "starting database backup"
 
-FAILED=0
-SUCCESSFUL=0
-DBS=0
+failed=0
+successful=0
+database_count=0
 
-DATABASES="$(psql -q -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false;")"
-if [ -z "$DATABASES" ];then
-        sendStatus "ERROR: NO DATABASES TO BACKUP"
+databases="$(psql -q -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false;")"
+if [ -z "$databases" ];then
+        send_status "error: no databases to backup"
         exit 1
 fi
 
@@ -219,189 +241,200 @@ FROM pg_catalog.pg_database d
     ;
 EOF
 
-for DBNAME in $DATABASES;
+for dbname in $databases;
 do
-   echo "*** BACKUP $DBNAME ****************************************************************************"
-   STARTTIME="$SECONDS"
+   log "*** pg_dump $dbname ***************************************************************************"
+
+   starttime="$SECONDS"
+   if [ "$backup_type" = "no" ];then
+      echo "per database backup disabled"
+      continue 
+   fi
 
    echo "=> backup schema"
-   pg_dump -c "$DBNAME" -s -f "${DUMPDIR}/${DBNAME}-${TIMESTAMP}_schema.sql.gz" -Z 7
-   RET1="$?"
+   pg_dump -c "$dbname" -s -f "${dump_dir}/${dbname}-${timestamp_isoish}_schema.sql.gz" -Z 7
+   exitcode1="$?"
 
    echo "=> backup database"
-
-   if [ "$BACKUP_TYPE" = "custom" ];then
-      pg_dump -Fc -c -f "${DUMPDIR}/${DBNAME}-${TIMESTAMP}_currently_dumping.custom.gz" -Z 7 --inserts "$DBNAME" && 
-         mv "${DUMPDIR}/${DBNAME}-${TIMESTAMP}_currently_dumping.custom.gz" "${DUMPDIR}/${DBNAME}-${TIMESTAMP}.custom.gz"
-      RET2="$?"
-   elif [ "$BACKUP_TYPE" = "no" ];then
-      echo "INFO: PER DATABASE BACKUP DISABLED"
+   if [ "$backup_type" = "custom" ];then
+      pg_dump -Fc -c -f "${dump_dir}/${dbname}-${timestamp_isoish}_currently_dumping.custom.gz" -Z 7 --inserts "$dbname" && 
+         mv "${dump_dir}/${dbname}-${timestamp_isoish}_currently_dumping.custom.gz" "${dump_dir}/${dbname}-${timestamp_isoish}.custom.gz"
+      exitcode2="$?"
    else
-      pg_dump -f "${DUMPDIR}/${DBNAME}-${TIMESTAMP}_currently_dumping.sql.gz" -Z 7 "$DBNAME" && 
-         mv "${DUMPDIR}/${DBNAME}-${TIMESTAMP}_currently_dumping.sql.gz" "${DUMPDIR}/${DBNAME}-${TIMESTAMP}.sql.gz"
-      RET2="$?"
+      pg_dump -f "${dump_dir}/${dbname}-${timestamp_isoish}_currently_dumping.sql.gz" -Z 7 "$dbname" && 
+         mv "${dump_dir}/${dbname}-${timestamp_isoish}_currently_dumping.sql.gz" "${dump_dir}/${dbname}-${timestamp_isoish}.sql.gz"
+      exitcode2="$?"
    fi
 
-   if [ "${DUMPDIR}" != "${BACKUPDIR}" ];then
-      echo "=> move backups to ${BACKUPDIR}"
-		mv -v "${DUMPDIR}/${DBNAME}-${TIMESTAMP}_schema.sql.gz" "${BACKUPDIR}/${DBNAME}-${TIMESTAMP}_schema.sql.gz" &&
-      if [ "$BACKUP_TYPE" = "custom" ];then
-         mv -v "${DUMPDIR}/${DBNAME}-${TIMESTAMP}.custom.gz" "${BACKUPDIR}/${DBNAME}-${TIMESTAMP}.custom.gz"
+   if [ "${dump_dir}" != "${backup_dir}" ];then
+      echo "=> move backups to ${backup_dir}"
+		mv -v "${dump_dir}/${dbname}-${timestamp_isoish}_schema.sql.gz" "${backup_dir}/${dbname}-${timestamp_isoish}_schema.sql.gz" &&
+      if [ "$backup_type" = "custom" ];then
+         mv -v "${dump_dir}/${dbname}-${timestamp_isoish}.custom.gz" "${backup_dir}/${dbname}-${timestamp_isoish}.custom.gz"
       else
-         mv -v "${DUMPDIR}/${DBNAME}-${TIMESTAMP}.sql.gz" "${BACKUPDIR}/${DBNAME}-${TIMESTAMP}.sql.gz"
+         mv -v "${dump_dir}/${dbname}-${timestamp_isoish}.sql.gz" "${backup_dir}/${dbname}-${timestamp_isoish}.sql.gz"
       fi
-      RET3="$?"
+      exitcode3="$?"
    else
-	  RET3="0"
+	  exitcode3="0"
    fi
 
-   DBS="$(( DBS + 1 ))"
-   DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"
-   if [ "$RET1" == "0" ] && [ "$RET2" == "0" ] && [ "$RET3" == "0" ];then
-        sendStatus "INFO: SUCESSFULLY CREATED BACKUP FOR '$DBNAME' after $DURATION minutes"
-        SUCCESSFUL="$(( SUCCESSFUL + 1))"
+   database_count="$(( database_count + 1 ))"
+   duration="$(( $(( SECONDS - starttime )) / 60 ))"
+   if [ "$exitcode1" == "0" ] && [ "$exitcode2" == "0" ] && [ "$exitcode3" == "0" ];then
+        send_status "successfully created backup for '$dbname' after $duration minutes"
+        successful="$(( successful + 1))"
    else
-     FAILED="$((FAILED + 1))"
-        sendStatus "ERROR: FAILED TO BACKUP '$DBNAME' after $DURATION minutes"
+     failed="$((failed + 1))"
+        send_status "error: failed to backup '$dbname' after $duration minutes"
    fi
 done
 
-if [ "$BASE_BACKUP" = "true" ];then
-   echo "*** BASE BACKUP *******************************************************************************"
-     BASE_DUMPDIR="${DUMPDIR}/base_backup_${TIMESTAMP}"
-     mkdir -p "${BASE_DUMPDIR}_currently_dumping" && \
-      pg_basebackup -D "${BASE_DUMPDIR}_currently_dumping" --format=tar --gzip --progress --write-recovery-conf --verbose && \
-      mv -v "${BASE_DUMPDIR}_currently_dumping" "${BACKUPDIR}/$(basename "$BASE_DUMPDIR")"
-     RET=$?
-     DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"
-     if [ "$RET1" == "0" ] && [ "$RET2" == "0" ] && [ "$RET3" == "0" ];then
-          sendStatus "INFO: SUCESSFULLY CREATED BASE BACKUP after $DURATION minutes"
-          SUCCESSFUL="$(( SUCCESSFUL + 1))"
+if [ "$base_backup" = "true" ];then
+    log "*** pg_basebackup *****************************************************************************"
+     starttime="$SECONDS"
+     base_dump_dir="${dump_dir}/base_backup_${timestamp_isoish}"
+     mkdir -p "${base_dump_dir}_currently_dumping" && \
+      pg_basebackup -D "${base_dump_dir}_currently_dumping" --format=tar --gzip --progress --write-recovery-conf --verbose && \
+      mv -v "${base_dump_dir}_currently_dumping" "${backup_dir}/$(basename "$base_dump_dir")"
+     exitcode=$?
+     duration="$(( $(( SECONDS - starttime )) / 60 ))"
+     if [ "$exitcode" == "0" ];then
+          send_status "successfully created base backup after $duration minutes"
+          successful="$(( successful + 1))"
      else
-       FAILED="$((FAILED + 1))"
-          sendStatus "ERROR: FAILED TO CREATE BASE BACKUP after $DURATION minutes"
+       failed="$((failed + 1))"
+          send_status "error: failed to create base backup after $duration minutes"
      fi
 fi
 
 sync_fs
 
-DURATION="$(( $(( SECONDS - STARTTIME_GLOBAL )) / 60 ))"
-if [ "$FAILED" -gt 0 ];then 
-  sendStatus "ERROR: FAILED ($FAILED failed backups,  $SUCCESSFUL successful backup ($DURATION minutes)"
+duration="$(( $(( SECONDS - startime_backup )) / 60 ))"
+if [ "$failed" -gt 0 ];then 
+  send_status "error: failed ($failed failed backups,  $successful successful backup ($duration minutes)"
 else
-  sendStatus "INFO: $SUCCESSFUL BACKUPS WERE SUCCESSFUL ($DURATION minutes)"
+  send_status "$successful backups were successful ($duration minutes)"
 fi
 
 
 
-if [ -f "${CRYPT_FILE}" ];then
-   echo "*** ENCRYPT BACKUPS ******************************************************************************"
-   sendStatus "INFO: ENCRYPTING DATABASE BACKUPS NOW"
-   while IFS= read -r -d $'\0' FILE;
+if [ -f "${crypt_file}" ];then
+   log "*** encrypt backups ******************************************************************************"
+   send_status "encrypting database backups now"
+   while IFS= read -r -d $'\0' file;
    do
-     STARTTIME="$SECONDS"
-     if [ -f "${FILE}.gpg" ];then
+     starttime="$SECONDS"
+     if [ -f "${file}.gpg" ];then
         continue
      fi
-     echo "encryping $FILE"
-	  gpg --symmetric --batch --cipher-algo aes256  --passphrase-file "$CRYPT_FILE" -o "${FILE}_currently_encrypting.gpg" "${FILE}" &&
-          mv "${FILE}_currently_encrypting.gpg" "${FILE}.gpg"
-     RET="$?"
-     DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"
-     if [ "$RET" == "0" ];then
-          sendStatus "INFO: SUCESSFULLY ENCRYPTED FILE '$FILE' after $DURATION minutes"
-          SUCCESSFUL="$(( SUCCESSFUL + 1))"
+     echo "encryping $file"
+	  gpg --symmetric --batch --cipher-algo aes256  --passphrase-file "$crypt_file" -o "${file}_currently_encrypting.gpg" "${file}" &&
+          mv "${file}_currently_encrypting.gpg" "${file}.gpg"
+     exitcode="$?"
+     duration="$(( $(( SECONDS - starttime )) / 60 ))"
+     if [ "$exitcode" == "0" ];then
+          send_status "successfully encrypted file '$file' after $duration minutes"
+          successful="$(( successful + 1))"
      else
-       FAILED="$((FAILED + 1))"
-          sendStatus "ERROR: FAILED TO ENCRYPT FILE '$FILE' after $DURATION minutes"
+       failed="$((failed + 1))"
+          send_status "error: failed to encrypt file '$file' after $duration minutes"
      fi
-  done < <( find "${BACKUPDIR}" -type f \( -name "*.custom.gz" -or -name "*.sql.gz"  \) -print0 )
+  done < <( find "${backup_dir}" -type f \( -name "*.custom.gz" -or -name "*.sql.gz"  \) -print0 )
 
-  sendStatus "INFO: ENCRYPTING BASE BACKUPS NOW"
-  while IFS= read -r -d $'\0' BASE_BACKUP_DIR;
+  send_status "encrypting base backups now"
+  while IFS= read -r -d $'\0' base_backup_dir;
   do
-     STARTTIME="$SECONDS"
-     if [ -f "${BASE_BACKUP_DIR}.tar.gpg" ];then
+     starttime="$SECONDS"
+     if [ -f "${base_backup_dir}.tar.gpg" ];then
         continue
      fi
-     echo "encryping $BASE_BACKUP_DIR"
-     tar c "${BASE_BACKUP_DIR}" | \
-           gpg --symmetric --batch --cipher-algo aes256  --passphrase-file "$CRYPT_FILE" -o "${BASE_BACKUP_DIR}_currently_encrypting.tar.gpg"  &&
-        mv "${BASE_BACKUP_DIR}_currently_encrypting.tar.gpg" "${BASE_BACKUP_DIR}.tar.gpg"
-     RET="$?"
-     DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"
-     if [ "$RET" == "0" ];then
-          sendStatus "INFO: SUCESSFULLY ENCRYPTED BASE BACKUP TO FILE '${BASE_BACKUP_DIR}.tar.gpg' after $DURATION minutes"
-          SUCCESSFUL="$(( SUCCESSFUL + 1))"
+     echo "encryping $base_backup_dir"
+     tar c "${base_backup_dir}" | \
+           gpg --symmetric --batch --cipher-algo aes256  --passphrase-file "$crypt_file" -o "${base_backup_dir}_currently_encrypting.tar.gpg"  &&
+        mv "${base_backup_dir}_currently_encrypting.tar.gpg" "${base_backup_dir}.tar.gpg"
+     exitcode="$?"
+     duration="$(( $(( SECONDS - starttime )) / 60 ))"
+     if [ "$exitcode" == "0" ];then
+          send_status "successfully encrypted base backup to file '${base_backup_dir}.tar.gpg' after $duration minutes"
+          successful="$(( successful + 1))"
      else
-       FAILED="$((FAILED + 1))"
-          sendStatus "ERROR: FAILED TO ENCRYPT BASE BACKUP TO FILE '${BASE_BACKUP_DIR}.tar.gpg' after $DURATION minutes"
+       failed="$((failed + 1))"
+          send_status "error: failed to encrypt base backup to file '${base_backup_dir}.tar.gpg' after $duration minutes"
      fi
-  done < <( find "${BACKUPDIR}" -type d -name "*_base_backup" -print0 )
+  done < <( find "${backup_dir}" -type d -name "*_base_backup" -print0 )
 
 fi
 
 sync_fs
 
  
-echo "*** UPLOAD BACKUPS ******************************************************************************"
-sendStatus "INFO: UPLOADING ENCRYPTED FILES NOW"
+log "*** upload backups ******************************************************************************"
+send_status "uploading encrypted files now"
 
 upload_backup_setup
 
-while IFS= read -r -d $'\0' FILE;
+while IFS= read -r -d $'\0' file;
 do
-   STARTTIME="$SECONDS"
+   starttime="$SECONDS"
+   # todo: strace it :-) if upload_backup terminates with returncode 2, the script exists silently exits here, possible bash bug?
+   set +e
+   upload_backup "$(basename "$file")"
+   exitcode="$?"
+   set -e
 
-   upload_backup "$(basename "$FILE")"
-   RET="$?"
+   duration="$(( $(( SECONDS - starttime )) / 60 ))"
+   if [ "$exitcode" == "0" ];then
+	unencrypted_backup_file="${file%%.gpg}"
+        echo "deleting unencrypted backup '$unencrypted_backup_file' file to save space"
+	rm -f "$unencrypted_backup_file"
 
-   DURATION="$(( $(( SECONDS - STARTTIME )) / 60 ))"
-   if [ "$RET" == "0" ];then
-        sendStatus "INFO: SUCESSFULLY UPLOADED FILE '$FILE' after $DURATION minutes"
-        SUCCESSFUL="$(( SUCCESSFUL + 1))"
-
+        send_status "successfully uploaded file '$file' after $duration minutes"
+        successful="$(( successful + 1))"
+   elif [ "$exitcode" == "2" ];then
+        echo "already uploaded backup $file"
+	continue
    else
-        FAILED="$((FAILED + 1))"
-        sendStatus "ERROR: FAILED TO UPLOAD FILE '$FILE' after $DURATION minutes"
+        failed="$((failed + 1))"
+        send_status "error: failed to upload file '$file' after $duration minutes"
    fi
-done < <( find "${BACKUPDIR}" -type f  -name "*.gpg" -print0)
+done < <( find "${backup_dir}" -type f  -name "*.gpg" -print0)
 
 
-echo "*** REMOVE OUTDATED BACKUPS **********************************************************************"
+log "*** remove outdated backups **********************************************************************"
 
-if ( echo -n "$MAXAGE_LOCAL"|grep -P -q '^\d+$' ) && [ "$MAXAGE_LOCAL" != "0" ] ;then
-   echo "INFO: DELETING OUTDATED BACKUP ON PV (OLDER THAN $MAXAGE_LOCAL DAYS)"
-   find "${BACKUPDIR}" -type f -name "*.uploaded" -mtime "+${MAXAGE_LOCAL}" -exec rm -fv {} \;
-   find "${BACKUPDIR}" -type f -name "*.custom.gz*" -mtime "+${MAXAGE_LOCAL}" -exec rm -fv {} \;
-   find "${BACKUPDIR}" -type f -name "*.sql.gz*" -mtime "+${MAXAGE_LOCAL}" -exec rm -fv {} \;
-   find "${BACKUPDIR}" -name "*_base_backup*" -mtime "+${MAXAGE_LOCAL}" -exec rm -frv {} \;
-   find "${BACKUPDIR}" -type f -name "*_currently_encrypting.gpg" -mtime +1 -exec rm -fv {} \;
-   find "${DUMPDIR}" -type f -name "*_currently_dumping.sql.gz" -mtime +1 -exec rm -fv {} \;
-   find "${DUMPDIR}" -type f -name "*_currently_dumping.custom.gz" -mtime +1 -exec rm -fv {} \;
-   find "${DUMPDIR}" -type d -name "*_currently_dumping" -mtime +1 -exec rm -frv {} \;
-   echo "TOTAL AMOUNT OF BACKUPS ON PV : $( du -scmh -- *.gz *.gpg|awk '/total/{print $1}')"
+if ( echo -n "$maxage_days_local"|grep -P -q '^\d+$' ) && [ "$maxage_days_local" != "0" ] ;then
+   echo "deleting outdated backup on pv (older than $maxage_days_local days)"
+   find "${backup_dir}" -type f -name "*.uploaded" -mtime "+${maxage_days_local}" -exec rm -fv {} \;
+   find "${backup_dir}" -type f -name "*.custom.gz*" -mtime "+${maxage_days_local}" -exec rm -fv {} \;
+   find "${backup_dir}" -type f -name "*.sql.gz*" -mtime "+${maxage_days_local}" -exec rm -fv {} \;
+   find "${backup_dir}" -name "*_base_backup*" -mtime "+${maxage_days_local}" -exec rm -frv {} \;
+   find "${backup_dir}" -type f -name "*_currently_encrypting.gpg" -mtime +1 -exec rm -fv {} \;
+   find "${dump_dir}" -type f -name "*_currently_dumping.sql.gz" -mtime +1 -exec rm -fv {} \;
+   find "${dump_dir}" -type f -name "*_currently_dumping.custom.gz" -mtime +1 -exec rm -fv {} \;
+   find "${dump_dir}" -type d -name "*_currently_dumping" -mtime +1 -exec rm -frv {} \;
+   echo "TOTAL AMOUNT OF BACKUPS ON PV : $( du -scmh -- *.gz *.gpg 2>/dev/null|awk '/total/{print $1}')"
    sync_fs
 else
-	echo "Age not correctly defined, '$MAXAGE_LOCAL'"
-	exit 1 
+   log "error: age not correctly defined, '$maxage_days_local'"
+   exit 1 
 fi
 
-if [[ -n "$MAXAGE_REMOTE" ]] && [[ "$MAXAGE_REMOTE" = "0" ]] && [[ -n "$BUCKET_NAME" ]] && [[ "$UPLOAD_TYPE" == "s3" ]];then
-      echo "INFO: DELETING OUTDATED BACKUP ON S3 (OLDER THAN $MAXAGE_REMOTE DAYS)"
-      for DBNAME in $DATABASES;
+if [[ -n "$maxage_days_remote" ]] && [[ "$maxage_days_remote" = "0" ]] && [[ -n "$bucket_name" ]] && [[ "$upload_type" == "s3" ]];then
+      echo "deleting outdated backup on s3 (older than $maxage_days_remote days)"
+      for dbname in $databases;
       do
-        echo "INFO: PRUNING OUTDATED BACKUPS FOR DATABASE $DBNAME IN $BUCKET_NAME"
-        echo "+s3prune.sh \"$BUCKET_NAME\" \"${MAXAGE_REMOTE} days ago\" \".*/${PG_IDENT}/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg\""
-        s3prune.sh "$BUCKET_NAME" "${MAXAGE_REMOTE} days ago" ".*/${PG_IDENT}/${DBNAME}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg"
+        echo "pruning outdated backups for database $dbname in $bucket_name"
+        echo "+s3prune.sh \"$bucket_name\" \"${maxage_days_remote} days ago\" \".*/${pg_ident}/${dbname}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg\""
+        s3prune.sh "$bucket_name" "${maxage_days_remote} days ago" ".*/${pg_ident}/${dbname}-\d\d\d\d-\d\d-\d\d_\d\d-\d\d-\d\d_.*\.gpg"
       done
 fi
 
-echo "*** OVERALL STATUS *******************************************************************************"
+echo "*** overall status *******************************************************************************"
 
-if [ "$FAILED" -gt "0" ];then
-   sendStatus "ERROR: THERE ARE $FAILED EXECUTION STEPS ($SUCCESSFUL SUCCESSFUL STEPS, $DBS DATABASES)"
+if [ "$failed" -gt "0" ];then
+   send_status "error: there are $failed execution steps ($successful successful steps, $database_count databases)"
 else
-   sendStatus "OK: BACKUP SUCCESSFUL, $SUCCESSFUL SUCCESSFUL STEPS WITH $DBS DATABASES"
+   send_status "ok: backup successful, $successful successful steps with $database_count databases"
 fi
 
