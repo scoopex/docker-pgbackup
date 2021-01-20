@@ -117,7 +117,7 @@ function upload_backup(){
     if az storage blob exists  --container "${bucket_name}" --name "$az_address" --output table|tail -1|grep -q -P '^True$'; then
         return 2
     fi
-    az storage blob upload  --file "$upload_name" --name "$az_address" --container "${bucket_name}" --output table >/dev/null
+    az storage blob upload  --max-connections 8 --file "$upload_name" --name "$az_address" --container "${bucket_name}" --output table >/dev/null
     ret_upload="$?"
  fi
 
