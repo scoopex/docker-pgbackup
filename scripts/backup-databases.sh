@@ -61,8 +61,8 @@ if [ "$$" == "1" ];then
    fi
 fi
 
-DUMPDIR="/srv/${PG_IDENT}/dump"
-BACKUPDIR="/srv/${PG_IDENT}/backup"
+DUMPDIR="/srv/dump"
+BACKUPDIR="/srv/backup"
 
 export PGUSER
 export PGPORT
