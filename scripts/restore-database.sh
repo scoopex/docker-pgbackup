@@ -1,89 +1,85 @@
 #!/bin/bash
 
-FILE="$1"
-DATABASE="$2"
 
-abort_it(){
-  local MSG="$1"
-  echo
-  echo "$MSG"
-  read -r -p "Continue (y/n) : " ASK
-  if [ "$ASK" = "y" ];then
-     return
-  fi
-  exit 1
-}
+run_dir="$(dirname "$(readlink -f "$0")")"
+# shellcheck source=/dev/null
+source "${run_dir}/functions.sh"
+
+file="$1"
+database="$2"
+crypt_password="${CRYPT_PASSWORD:?}"
+
 
 export PGUSER="${POSTGRESQL_USERNAME:?Postgres Username}"
 export PGPORT="${POSTGRESQL_PORT:-5432}"
 export PGHOST="${POSTGRESQL_HOST:?postgres host}"
 export PGPASSWORD="${POSTGRESQL_PASSWORD:?postgres superuser password}"
 
-if [ -z "$DATABASE" ];then
+if [ -z "$database" ];then
    echo "$0 <file> <database>"
    exit 1
 
 fi
 
-if ! [ -f "$FILE" ];then
-    echo "ERROR: $FILE does not exist"
+if ! [ -f "$file" ];then
+    log "error: $file does not exist"
     exit 1
 fi
 
 
-if [[ -n "$CRYPT_PASSWORD"  ]];then
-   CRYPT_FILE="$HOME/.crypt_password"
-   echo -n "$CRYPT_PASSWORD" > "$CRYPT_FILE"
+if [[ -n "$crypt_password"  ]];then
+   crypt_file="${HOME}/.crypt_password"
+   echo -n "$crypt_password" > "$crypt_file"
 fi
 
 
-CONN_COUNT="$(psql -c "SELECT count(*) FROM pg_stat_activity WHERE datname = '${DATABASE}';" -t|sed '~s, ,,g')"
-if [ "$CONN_COUNT" -gt 0 ];then
-  psql -c "SELECT * FROM pg_stat_activity WHERE datname = '${DATABASE}';" 
-  abort_it "THERE ARE $CONN_COUNT OPEN CONNECTIONS TO DATABASE '${DATABASE}', TERMINATE CONNECTIONS?"
+conn_count="$(psql -c "select count(*) from pg_stat_activity where datname = '${database}';" -t|sed '~s, ,,g')"
+if [ "$conn_count" -gt 0 ];then
+  psql -c "select * from pg_stat_activity where datname = '${database}';" 
+  abort_it "there are $conn_count open connections to database '${database}', terminate connections?"
 fi
 
 
 
-echo "INFO: TERMINATING ALL DATABASE CONNECTIONS"
+log "terminating all database connections"
 (
 cat <<EOF
-SELECT * FROM pg_stat_activity WHERE datname = '${DATABASE}';
+select * from pg_stat_activity where datname = '${database}';
 
-UPDATE pg_database SET datallowconn = 'false' WHERE datname = '${DATABASE}';
-SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${DATABASE}';
+update pg_database set datallowconn = 'false' where datname = '${database}';
+select pg_terminate_backend(pid) from pg_stat_activity where datname = '${database}';
 EOF
 ) | psql 
 
 
-if ( echo "$FILE"|grep -P ".+\.gpg" );then
-  DECRYPTED_FILE="${FILE%%.gpg}"
-  if [ -f "$DECRYPTED_FILE" ];then
-      abort_it "'$DECRYPTED_FILE' ALREADY EXISTS, USE THAT FILE?"
+if ( echo "$file"|grep -P ".+\.gpg" );then
+  decrypted_file="${file%%.gpg}"
+  if [ -f "$decrypted_file" ];then
+      abort_it "'$decrypted_file' already exists, use that file?"
   else
-      gpg -d --batch --passphrase-file "$CRYPT_FILE" -o "${DECRYPTED_FILE}" "$FILE"
-      RET="$?"
-      if [ "$RET" != "0" ];then
-         echo "ERROR: DECRYPT OF '$FILE' TO '$DECRYPTED_FILE' FAILED"
-         exit $RET
+      gpg -d --batch --passphrase-file "$crypt_file" -o "${decrypted_file}" "$file"
+      ret="$?"
+      if [ "$ret" != "0" ];then
+         log "error: decrypt of '$file' to '$decrypted_file' failed"
+         exit $ret
       else
-         echo "INFO: DECRYPT OF '$FILE' TO '$DECRYPTED_FILE' SUCCESSFUL"
+         log "info: decrypt of '$file' to '$decrypted_file' successful"
       fi
   fi
-  FILE="$DECRYPTED_FILE"
+  file="$decrypted_file"
 fi
 
-echo "INFO: ALLOWING CONNECTIONS AGAIN"
+log "info: allowing connections again"
+psql -c "update pg_database set datallowconn = 'true' where datname = '${database}';"
 
-pg_restore -j8 --verbose --exit-on-error --clean --if-exists -Fc -d "${DATABASE}" "${FILE}"
-RET="$?"
+pg_restore -j8 --verbose --exit-on-error --clean --if-exists -Fc -d "${database}" "${file}"
+ret="$?"
 
-if [ "$RET" != "0" ];then
-   echo "ERROR: RESTORE FAILED WITH CODE $RET AFTER $SECONDS SECONDS"
-   exit $RET
+if [ "$ret" != "0" ];then
+   log "error: restore failed with code $ret after $(( SECONDS / 60 )) minutes"
+   exit $ret
 else
-   echo "INFO: RESTORE SUCCESSFUL AFTER $SECONDS SECONDS"
-   psql -c "UPDATE pg_database SET datallowconn = 'true' WHERE datname = '${DATABASE}';"
+   log "ok: restore successful after $SECONDS seconds"
    exit 0
 fi
 
