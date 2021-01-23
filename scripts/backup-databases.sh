@@ -393,7 +393,8 @@ if ( echo -n "$maxage_days_local"|grep -P -q '^\d+$' ) && [ "$maxage_days_local"
    find "${dump_dir}" -type f -name "*_currently_dumping.sql.gz" -mtime +1 -exec rm -fv {} \;
    find "${dump_dir}" -type f -name "*_currently_dumping.custom.gz" -mtime +1 -exec rm -fv {} \;
    find "${dump_dir}" -type d -name "*_currently_dumping" -mtime +1 -exec rm -frv {} \;
-   echo "total amount of backups on pv : $( du -scmh -- *.gz *.gpg 2>/dev/null|awk '/total/{print $1}')"
+   cd "${backup_dir}"
+   send_status "total amount of backups on pv : $( du -scmh -- *.gz *.gpg 2>/dev/null|awk '/total/{print $1}')"
    sync_fs
 else
    log "error: age not correctly defined, '$maxage_days_local'"
@@ -412,9 +413,9 @@ fi
 
 echo "*** overall status *******************************************************************************"
 
+duration="$(( SECONDS  / 60 ))"
 if [ "$failed" -gt "0" ];then
-   send_status "error: there are $failed execution steps ($successful successful steps, $database_count databases)"
+   send_status "error: backup failed after ${duration} minutes, there are $failed execution steps ($successful successful steps, $database_count databases)"
 else
-   send_status "ok: backup successful, $successful successful steps with $database_count databases"
+   send_status "ok: backup successful after ${duration} minutes, $successful successful steps with $database_count databases"
 fi
-
