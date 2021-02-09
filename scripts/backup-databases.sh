@@ -47,6 +47,10 @@ PGPORT="${POSTGRESQL_PORT:-5432}"
 PGHOST="${POSTGRESQL_HOST:?postgres host}"
 PGPASSWORD="${POSTGRESQL_PASSWORD:?postgres superuser password}"
 
+if [ "$BASE_BACKUP" = "true" ];then
+   base_backup_user="${POSTGRESQL_REPLICATION_USERNAME?Replication Username}"
+   base_backup_password="${POSTGRESQL_REPLICATION_PASSWORD?Replication Password}"
+fi
 
 if [[ -n "$crypt_password"  ]];then
    crypt_file="$HOME/.crypt_password"
@@ -135,24 +139,25 @@ export PGPASSWORD
 
 data="$(cat <<EOF
 **********************************************************************
-** ENV_FILE       : $env_file
-** CRYPT_FILE     : $crypt_file
-** DUMP_DIR       : $dump_dir
-** BACKUPDIR      : $backup_dir
-** MAXAGE_LOCAL   : $maxage_days_local days
-** MAXAGE_REMOTE  : $maxage_days_remote days
-** UPLOAD_TYPE    : $upload_type
-** BACKUP_TYPE    : $backup_type
-** BASE_BACKUP    : $base_backup
+** ENV_FILE         : $env_file
+** CRYPT_FILE       : $crypt_file
+** DUMP_DIR         : $dump_dir
+** BACKUPDIR        : $backup_dir
+** MAXAGE_LOCAL     : $maxage_days_local days
+** MAXAGE_REMOTE    : $maxage_days_remote days
+** UPLOAD_TYPE      : $upload_type
+** BACKUP_TYPE      : $backup_type
+** BASE_BACKUP      : $base_backup
+** BASE_BACKUP_USER : ${base_backup_user:-}
 **
-** PGUSER         : $PGUSER
-** PGHOST         : $PGHOST
-** PGPORT         : $PGPORT
+** PGUSER           : $PGUSER
+** PGHOST           : $PGHOST
+** PGPORT           : $PGPORT
 **
-** ZABBIX_SERVER  : $zabbix_server 
-** ZABBIX_HOST    : $zabbix_host
+** ZABBIX_SERVER    : $zabbix_server
+** ZABBIX_HOST      : $zabbix_host
 **
-** BUCKET_NAME    : $bucket_name
+** BUCKET_NAME      : $bucket_name
 **********************************************************************
 EOF
 )"
@@ -274,6 +279,12 @@ done
 if [ "$base_backup" = "true" ];then
     log "*** pg_basebackup *****************************************************************************"
      starttime="$SECONDS"
+
+     # Environment variables for the postgres clients
+     export PGUSER="$base_backup_user"
+     export PGPASSWORD="$base_backup_password"
+     echo "performing base backup with user $PGUSER now"
+
      base_dump_dir="${dump_dir}/base_backup_${timestamp_isoish}"
      mkdir -p "${base_dump_dir}_currently_dumping" && \
       pg_basebackup -D "${base_dump_dir}_currently_dumping" --format=tar --gzip --progress --write-recovery-conf --verbose && \
