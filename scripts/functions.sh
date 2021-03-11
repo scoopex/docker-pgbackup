@@ -1,5 +1,5 @@
 function log(){
-    local text="$1"
+    local text="$(date --iso-8601=minutes) $1"
     if (echo "$text" |grep -q -P "failed|error:" );then
     	printf '\e[1;31m%-6s\e[m\n' "$text"
     elif (echo "$text" |grep -q -P "successfully|ok:" );then
