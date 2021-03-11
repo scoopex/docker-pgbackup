@@ -18,8 +18,8 @@ perms:
 
 backup: perms
 ifndef PROFILE
-		@echo "YOU HAVE TO DEFINE ENVIRONMENT VARIABLE 'PROFILE'- THE PROFILE FILENAME IN /backups"
-		@exit 1
+	@echo "YOU HAVE TO DEFINE ENVIRONMENT VARIABLE 'PROFILE'- THE PROFILE FILENAME IN /backups"
+	@exit 1
 endif
 	docker run -ti --network host --hostname "test-run-test" \
 		-v /etc/host:/etc/host -v ${PWD}/backups/${PROFILE}/:/srv \
