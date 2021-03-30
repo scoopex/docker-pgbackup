@@ -22,8 +22,8 @@ if [ -z "$database" ];then
 fi
 
 if ! [ -f "$file" ];then
-    log "error: $file does not exist"
-    exit 1
+   log "error: $file does not exist"
+   exit 1
 fi
 
 
@@ -35,8 +35,8 @@ fi
 
 conn_count="$(psql -c "select count(*) from pg_stat_activity where datname = '${database}';" -t|sed '~s, ,,g')"
 if [ "$conn_count" -gt 0 ];then
-  psql -c "select * from pg_stat_activity where datname = '${database}';" 
-  abort_it "there are $conn_count open connections to database '${database}', terminate connections?"
+   psql -c "select * from pg_stat_activity where datname = '${database}';" 
+   abort_it "there are $conn_count open connections to database '${database}', terminate connections?"
 fi
 
 
@@ -46,17 +46,17 @@ log "terminating all database connections"
 cat <<EOF
 select * from pg_stat_activity where datname = '${database}';
 
-update pg_database set datallowconn = 'false' where datname = '${database}';
-select pg_terminate_backend(pid) from pg_stat_activity where datname = '${database}';
+   update pg_database set datallowconn = 'false' where datname = '${database}';
+   select pg_terminate_backend(pid) from pg_stat_activity where datname = '${database}';
 EOF
 ) | psql 
 
 
 if ( echo "$file"|grep -P ".+\.gpg" );then
-  decrypted_file="${file%%.gpg}"
-  if [ -f "$decrypted_file" ];then
+   decrypted_file="${file%%.gpg}"
+   if [ -f "$decrypted_file" ];then
       abort_it "'$decrypted_file' already exists, use that file?"
-  else
+   else
       gpg -d --batch --passphrase-file "$crypt_file" -o "${decrypted_file}" "$file"
       ret="$?"
       if [ "$ret" != "0" ];then
@@ -65,15 +65,25 @@ if ( echo "$file"|grep -P ".+\.gpg" );then
       else
          log "info: decrypt of '$file' to '$decrypted_file' successful"
       fi
-  fi
-  file="$decrypted_file"
+   fi
+   file="$decrypted_file"
 fi
 
 log "info: allowing connections again"
 psql -c "update pg_database set datallowconn = 'true' where datname = '${database}';"
 
-pg_restore -j8 --verbose --exit-on-error --clean --if-exists -Fc -d "${database}" "${file}"
-ret="$?"
+case $file in 
+   *.sql.gz)
+      log "performing sql backup restore"
+      psql --set ON_ERROR_STOP="${ON_ERROR_STOP:-on}"  < <(zcat "${file}")
+      ret="$?"
+      ;;
+   *)
+      log "performing custom backup restore"
+      pg_restore -j8 --verbose --exit-on-error --clean --if-exists -Fc -d "${database}" "${file}"
+      ret="$?"
+      ;;
+esac
 
 if [ "$ret" != "0" ];then
    log "error: restore failed with code $ret after $(( SECONDS / 60 )) minutes"

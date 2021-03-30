@@ -206,7 +206,13 @@ failed=0
 successful=0
 database_count=0
 
-databases="$(psql -q -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false;")"
+if [ -z "$DATABASES_OVERRIDE" ];then
+   databases="$(psql -q -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false;")"
+else
+   log "warn: override backuped databases with $DATABASES_OVERRIDE"
+   databases="$DATABASES_OVERRIDE"
+fi
+
 if [ -z "$databases" ];then
         send_status "error: no databases to backup"
         exit 1
