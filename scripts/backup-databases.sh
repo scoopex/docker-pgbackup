@@ -33,6 +33,7 @@ s3_cfg="${S3_CFG:-/srv/conf/s3cfg}"
 zabbix_server="${ZABBIX_SERVER:-}"
 zabbix_host="${ZABBIX_HOST:-}"
 backup_type="${BACKUP_TYPE:-custom}"
+databases_to_backup="${DATABASES_OVERRIDE:-all}"
 base_backup="${BASE_BACKUP:-false}"
 bucket_name="${BUCKET_NAME:-backup}"
 
@@ -47,7 +48,7 @@ PGPORT="${POSTGRESQL_PORT:-5432}"
 PGHOST="${POSTGRESQL_HOST:?postgres host}"
 PGPASSWORD="${POSTGRESQL_PASSWORD:?postgres superuser password}"
 
-if [ "$BASE_BACKUP" = "true" ];then
+if [ "$base_backup" = "true" ];then
    base_backup_user="${POSTGRESQL_REPLICATION_USERNAME?Replication Username}"
    base_backup_password="${POSTGRESQL_REPLICATION_PASSWORD?Replication Password}"
 fi
@@ -206,11 +207,11 @@ failed=0
 successful=0
 database_count=0
 
-if [ -z "$DATABASES_OVERRIDE" ];then
+if [ "$databases_to_backup" = "all" ];then
    databases="$(psql -q -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false;")"
 else
-   log "warn: override backuped databases with $DATABASES_OVERRIDE"
-   databases="$DATABASES_OVERRIDE"
+   log "warn: override databases to backup '$databases_to_backup'"
+   databases="$databases_to_backup"
 fi
 
 if [ -z "$databases" ];then
