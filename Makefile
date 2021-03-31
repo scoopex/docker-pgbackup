@@ -12,9 +12,9 @@ build:
 	docker build --build-arg FORCE_UPGRADE_MARKER="${FORCE_UPGRADE_MARKER}" -t ${IMAGE_NAME}:${VERSION} -f Dockerfile .
 
 perms: 
-	chmod 755 scripts
-	chmod 644 scripts/*
-	chmod 755 scripts/*.sh
+	find scripts -type f -exec chmod 644 {} \;
+	find scripts -type d -exec chmod 755 {} \;
+	find scripts -type f -name "*.sh" -exec chmod 755 {} \;
 
 backup: perms
 ifndef PROFILE
