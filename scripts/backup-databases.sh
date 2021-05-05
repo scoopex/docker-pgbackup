@@ -166,8 +166,8 @@ data="$(cat <<EOF
 ** ZABBIX_HOST         : $zabbix_host
 ** ZABBIX_SERVER_PORT  : $zabbix_port
 **
-** BUCKET_NAME      : $bucket_name
-**********************************************************************************
+** BUCKET_NAME         : $bucket_name
+*********************************************************************************************************
 EOF
 )"
 log "$data"
