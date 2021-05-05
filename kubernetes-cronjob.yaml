@@ -4,9 +4,6 @@ metadata:
   annotations:
   labels:
     app: postgresql-backup
-    argocd.argoproj.io/instance: staging2
-    instance: staging2
-    managed-by: Helm
   name: postgresql-backup
   namespace: staging2
 spec:
