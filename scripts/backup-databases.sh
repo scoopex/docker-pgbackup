@@ -30,8 +30,15 @@ crypt_password="${CRYPT_PASSWORD:-}"
 upload_type="${UPLOAD_TYPE:-off}"
 
 s3_cfg="${S3_CFG:-/srv/conf/s3cfg}"
-zabbix_server="${ZABBIX_SERVER:-}"
+
+zabbix_port="${ZABBIX_SERVER_PORT:-10051}"
+if [ -n "$ZABBIX_PROXY_SERVER_HOST" ];then
+   zabbix_server="${ZABBIX_PROXY_SERVER_HOST}"
+else
+   zabbix_server="${ZABBIX_SERVER:-}"
+fi
 zabbix_host="${ZABBIX_HOST:-}"
+
 backup_type="${BACKUP_TYPE:-custom}"
 databases_to_backup="${DATABASES_OVERRIDE:-all}"
 base_backup="${BASE_BACKUP:-false}"
@@ -139,27 +146,28 @@ export PGHOST
 export PGPASSWORD
 
 data="$(cat <<EOF
-**********************************************************************
-** ENV_FILE         : $env_file
-** CRYPT_FILE       : $crypt_file
-** DUMP_DIR         : $dump_dir
-** BACKUPDIR        : $backup_dir
-** MAXAGE_LOCAL     : $maxage_days_local days
-** MAXAGE_REMOTE    : $maxage_days_remote days
-** UPLOAD_TYPE      : $upload_type
-** BACKUP_TYPE      : $backup_type
-** BASE_BACKUP      : $base_backup
-** BASE_BACKUP_USER : ${base_backup_user:-}
+**********************************************************************************
+** ENV_FILE            : $env_file
+** CRYPT_FILE          : $crypt_file
+** DUMP_DIR            : $dump_dir
+** BACKUPDIR           : $backup_dir
+** MAXAGE_LOCAL        : $maxage_days_local days
+** MAXAGE_REMOTE       : $maxage_days_remote days
+** UPLOAD_TYPE         : $upload_type
+** BACKUP_TYPE         : $backup_type
+** BASE_BACKUP         : $base_backup
+** BASE_BACKUP_USER    : ${base_backup_user:-}
 **
-** PGUSER           : $PGUSER
-** PGHOST           : $PGHOST
-** PGPORT           : $PGPORT
+** PGUSER              : $PGUSER
+** PGHOST              : $PGHOST
+** PGPORT              : $PGPORT
 **
-** ZABBIX_SERVER    : $zabbix_server
-** ZABBIX_HOST      : $zabbix_host
+** ZABBIX_SERVER       : $zabbix_server (alternatively ZABBIX_PROXY_SERVER_HOST)
+** ZABBIX_HOST         : $zabbix_host
+** ZABBIX_SERVER_PORT  : $zabbix_port
 **
 ** BUCKET_NAME      : $bucket_name
-**********************************************************************
+**********************************************************************************
 EOF
 )"
 log "$data"
