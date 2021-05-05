@@ -1,0 +1,100 @@
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  annotations:
+  labels:
+    app: postgresql-backup
+    argocd.argoproj.io/instance: staging2
+    instance: staging2
+    managed-by: Helm
+  name: postgresql-backup
+  namespace: staging2
+spec:
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    metadata:
+      creationTimestamp: null
+    spec:
+      template:
+        metadata:
+          creationTimestamp: null
+        spec:
+          containers:
+          - env:
+            - name: PG_IDENT
+              value: staging2
+            - name: BASE_BACKUP
+              value: "true"
+            - name: UPLOAD_TYPE
+              value: az
+            - name: MANUAL
+              value: "false"
+            - name: BACKUP_TYPE
+              value: custom
+            - name: CRYPT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: encryption_password
+                  name: backup
+            - name: AZURE_STORAGE_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  key: azure_storage_connection_string
+                  name: backup
+            - name: MAXAGE_LOCAL
+              value: "5"
+            - name: MAXAGE_REMOTE
+              value: "0"
+            - name: BUCKET_NAME
+              value: database
+            - name: POSTGRESQL_HOST
+              value: postgresql
+            - name: POSTGRESQL_USERNAME
+              value: postgres
+            - name: POSTGRESQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: postgresql-password
+                  name: postgresql
+            - name: POSTGRESQL_REPLICATION_USERNAME
+              value: replication
+            - name: POSTGRESQL_REPLICATION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: postgresql-replication-password
+                  name: postgresql
+            - name: POSTGRESQL_PORT
+              value: "5432"
+            - name: ZABBIX_PROXY_SERVER_HOST
+              value: zabbix-proxy.infra-zabbix-proxy.svc.cluster.local
+            - name: ZABBIX_HOST
+              value: system-{{ .Release.Namespace | quote }}
+            image: getflip/pgbackup:latest
+            imagePullPolicy: IfNotPresent
+            name: postgres-backup
+            resources:
+              limits:
+                cpu: 1500m
+                memory: 1500M
+              requests:
+                cpu: 500m
+                memory: 1500M
+            volumeMounts:
+            - mountPath: /srv
+              name: postgres-dumps
+          restartPolicy: Never
+          schedulerName: default-scheduler
+          securityContext:
+            fsGroup: 1001
+            runAsGroup: 1001
+            runAsUser: 1001
+          terminationGracePeriodSeconds: 30
+          volumes:
+          - name: postgres-dumps
+            persistentVolumeClaim:
+              claimName: cronjob-pg-backup
+  schedule: 0 2 * * *
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  suspend: false
