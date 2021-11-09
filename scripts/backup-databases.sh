@@ -441,6 +441,8 @@ echo "*** overall status *******************************************************
 duration="$(( SECONDS  / 60 ))"
 if [ "$failed" -gt "0" ];then
    send_status "error: backup failed after ${duration} minutes, there are $failed execution steps ($successful successful steps, $database_count databases)"
+   exit 1
 else
    send_status "ok: backup successful after ${duration} minutes, $successful successful steps with $database_count databases"
+   exit 0
 fi
