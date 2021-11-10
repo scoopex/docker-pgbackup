@@ -2,6 +2,7 @@
 
 set -eux
 
+export DEBIAN_FRONTEND=noninteractive
 apt-get autoremove -y
 source /etc/lsb-release
 

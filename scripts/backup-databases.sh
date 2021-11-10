@@ -304,6 +304,13 @@ if [ "$base_backup" = "true" ];then
     log "*** pg_basebackup *****************************************************************************"
      starttime="$SECONDS"
 
+     echo "switching wal/xlog"
+     if [ "$(get_major_version)" -gt "11" ];then
+         psql -q -t -A -c "select * from pg_switch_xlog();"
+     else
+         psql -q -t -A -c "select * from pg_switch_wal();"
+     fi
+
      # Environment variables for the postgres clients
      export PGUSER="$base_backup_user"
      export PGPASSWORD="$base_backup_password"
@@ -311,12 +318,6 @@ if [ "$base_backup" = "true" ];then
 
      base_dump_dir="${dump_dir}/base_backup_${timestamp_isoish}"
 
-     echo "switching wal/xlog"
-     if [ "$(get_major_version)" -gt "11" ];then
-         psql -q -t -A -c "select * from pg_switch_xlog();"
-     else
-         psql -q -t -A -c "select * from pg_switch_wal();"
-     fi
 
      mkdir -p "${base_dump_dir}_currently_dumping" && \
       pg_basebackup -D "${base_dump_dir}_currently_dumping" --format=tar --gzip --progress --write-recovery-conf --verbose && \
