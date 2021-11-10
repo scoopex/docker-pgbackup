@@ -118,6 +118,16 @@ function upload_backup(){
  return 0
 }
 
+function get_major_version(){
+   major_version="$(psql -q -t -A -c "SELECT version();"|awk '/PostgreSQL .* on /{split($2,a,".");print a[1];}')"
+   if [ -z "$major_version" ];then
+      echo -n "unknown"
+   else
+      echo -n "$major_version"
+   fi
+}
+
+
 #######################################################################################################################################
 ####
 #### MAIN
@@ -300,6 +310,14 @@ if [ "$base_backup" = "true" ];then
      echo "performing base backup with user $PGUSER now"
 
      base_dump_dir="${dump_dir}/base_backup_${timestamp_isoish}"
+
+     echo "switching wal/xlog"
+     if [ "$(get_major_version)" -gt "11" ];then
+         psql -q -t -A -c "select * from pg_switch_xlog();"
+     else
+         psql -q -t -A -c "select * from pg_switch_wal();"
+     fi
+
      mkdir -p "${base_dump_dir}_currently_dumping" && \
       pg_basebackup -D "${base_dump_dir}_currently_dumping" --format=tar --gzip --progress --write-recovery-conf --verbose && \
       mv -v "${base_dump_dir}_currently_dumping" "${backup_dir}/$(basename "$base_dump_dir")"
