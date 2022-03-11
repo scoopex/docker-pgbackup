@@ -2,6 +2,7 @@
 
 set -eux
 
+export DEBIAN_FRONTEND=noninteractive
 apt-get autoremove -y
 source /etc/lsb-release
 
@@ -11,7 +12,7 @@ echo "deb http://apt.postgresql.org/pub/repos/apt ${DISTRIB_CODENAME}-pgdg main"
 curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
 apt-get update 
 
-apt-get install postgresql-client-11 zabbix-agent curl vim-tiny s3cmd pv azure-cli screen pgtop pg-activity pgcli -y
+apt-get install postgresql-client-11 zabbix-agent curl vim-tiny s3cmd pv azure-cli screen pgtop pg-activity pgcli openssh-client less -y
 apt-get upgrade -y
 apt-get dist-upgrade -y
 apt-get autoremove -y

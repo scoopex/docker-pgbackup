@@ -1,7 +1,6 @@
 #!/bin/bash
 
-set -eu 
-
+set -u 
 
 #######################################################################################################################################
 ####
@@ -30,9 +29,17 @@ crypt_password="${CRYPT_PASSWORD:-}"
 upload_type="${UPLOAD_TYPE:-off}"
 
 s3_cfg="${S3_CFG:-/srv/conf/s3cfg}"
-zabbix_server="${ZABBIX_SERVER:-}"
+
+zabbix_port="${ZABBIX_SERVER_PORT:-10051}"
+if [ -n "$ZABBIX_PROXY_SERVER_HOST" ];then
+   zabbix_server="${ZABBIX_PROXY_SERVER_HOST}"
+else
+   zabbix_server="${ZABBIX_SERVER:-}"
+fi
 zabbix_host="${ZABBIX_HOST:-}"
+
 backup_type="${BACKUP_TYPE:-custom}"
+databases_to_backup="${DATABASES_OVERRIDE:-all}"
 base_backup="${BASE_BACKUP:-false}"
 bucket_name="${BUCKET_NAME:-backup}"
 
@@ -47,7 +54,7 @@ PGPORT="${POSTGRESQL_PORT:-5432}"
 PGHOST="${POSTGRESQL_HOST:?postgres host}"
 PGPASSWORD="${POSTGRESQL_PASSWORD:?postgres superuser password}"
 
-if [ "$BASE_BACKUP" = "true" ];then
+if [ "$base_backup" = "true" ];then
    base_backup_user="${POSTGRESQL_REPLICATION_USERNAME?Replication Username}"
    base_backup_password="${POSTGRESQL_REPLICATION_PASSWORD?Replication Password}"
 fi
@@ -111,6 +118,16 @@ function upload_backup(){
  return 0
 }
 
+function get_major_version(){
+   major_version="$(psql -q -t -A -c "SELECT version();"|awk '/PostgreSQL .* on /{split($2,a,".");print a[1];}')"
+   if [ -z "$major_version" ];then
+      echo -n "unknown"
+   else
+      echo -n "$major_version"
+   fi
+}
+
+
 #######################################################################################################################################
 ####
 #### MAIN
@@ -138,27 +155,28 @@ export PGHOST
 export PGPASSWORD
 
 data="$(cat <<EOF
-**********************************************************************
-** ENV_FILE         : $env_file
-** CRYPT_FILE       : $crypt_file
-** DUMP_DIR         : $dump_dir
-** BACKUPDIR        : $backup_dir
-** MAXAGE_LOCAL     : $maxage_days_local days
-** MAXAGE_REMOTE    : $maxage_days_remote days
-** UPLOAD_TYPE      : $upload_type
-** BACKUP_TYPE      : $backup_type
-** BASE_BACKUP      : $base_backup
-** BASE_BACKUP_USER : ${base_backup_user:-}
+**********************************************************************************
+** ENV_FILE            : $env_file
+** CRYPT_FILE          : $crypt_file
+** DUMP_DIR            : $dump_dir
+** BACKUPDIR           : $backup_dir
+** MAXAGE_LOCAL        : $maxage_days_local days
+** MAXAGE_REMOTE       : $maxage_days_remote days
+** UPLOAD_TYPE         : $upload_type
+** BACKUP_TYPE         : $backup_type
+** BASE_BACKUP         : $base_backup
+** BASE_BACKUP_USER    : ${base_backup_user:-}
 **
-** PGUSER           : $PGUSER
-** PGHOST           : $PGHOST
-** PGPORT           : $PGPORT
+** PGUSER              : $PGUSER
+** PGHOST              : $PGHOST
+** PGPORT              : $PGPORT
 **
-** ZABBIX_SERVER    : $zabbix_server
-** ZABBIX_HOST      : $zabbix_host
+** ZABBIX_SERVER       : $zabbix_server (alternatively ZABBIX_PROXY_SERVER_HOST)
+** ZABBIX_HOST         : $zabbix_host
+** ZABBIX_SERVER_PORT  : $zabbix_port
 **
-** BUCKET_NAME      : $bucket_name
-**********************************************************************
+** BUCKET_NAME         : $bucket_name
+*********************************************************************************************************
 EOF
 )"
 log "$data"
@@ -206,7 +224,13 @@ failed=0
 successful=0
 database_count=0
 
-databases="$(psql -q -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false;")"
+if [ "$databases_to_backup" = "all" ];then
+   databases="$(psql -q -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false;")"
+else
+   log "warn: override databases to backup '$databases_to_backup'"
+   databases="$databases_to_backup"
+fi
+
 if [ -z "$databases" ];then
         send_status "error: no databases to backup"
         exit 1
@@ -280,12 +304,21 @@ if [ "$base_backup" = "true" ];then
     log "*** pg_basebackup *****************************************************************************"
      starttime="$SECONDS"
 
+     echo "switching wal/xlog"
+     if [ "$(get_major_version)" -gt "11" ];then
+         psql -q -t -A -c "select * from pg_switch_xlog();"
+     else
+         psql -q -t -A -c "select * from pg_switch_wal();"
+     fi
+
      # Environment variables for the postgres clients
      export PGUSER="$base_backup_user"
      export PGPASSWORD="$base_backup_password"
      echo "performing base backup with user $PGUSER now"
 
      base_dump_dir="${dump_dir}/base_backup_${timestamp_isoish}"
+
+
      mkdir -p "${base_dump_dir}_currently_dumping" && \
       pg_basebackup -D "${base_dump_dir}_currently_dumping" --format=tar --gzip --progress --write-recovery-conf --verbose && \
       mv -v "${base_dump_dir}_currently_dumping" "${backup_dir}/$(basename "$base_dump_dir")"
@@ -399,11 +432,11 @@ if ( echo -n "$maxage_days_local"|grep -P -q '^\d+$' ) && [ "$maxage_days_local"
    echo "deleting outdated backup on pv (older than $maxage_days_local days)"
    find "${backup_dir}" -type f -name "*.custom.gz*" -mtime "+${maxage_days_local}" -exec rm -fv {} \;
    find "${backup_dir}" -type f -name "*.sql.gz*" -mtime "+${maxage_days_local}" -exec rm -fv {} \;
-   find "${backup_dir}" -name "*_base_backup*" -mtime "+${maxage_days_local}" -exec rm -frv {} \;
+   find "${backup_dir}" -type d -name "base_backup_????-??-??_??-??-??" -mtime "+${maxage_days_local}" -maxdepth 1 -exec rm -frv {} \;
    find "${backup_dir}" -type f -name "*_currently_encrypting.gpg" -mtime +1 -exec rm -fv {} \;
    find "${dump_dir}" -type f -name "*_currently_dumping.sql.gz" -mtime +1 -exec rm -fv {} \;
    find "${dump_dir}" -type f -name "*_currently_dumping.custom.gz" -mtime +1 -exec rm -fv {} \;
-   find "${dump_dir}" -type d -name "*_currently_dumping" -mtime +1 -exec rm -frv {} \;
+   find "${dump_dir}" -type d -name "*_currently_dumping" -mtime +1 -maxdepth 1 -exec rm -frv {} \;
    cd "${backup_dir}"
    send_status "total amount of backups on pv : $( du -scmh -- *.gz *.gpg 2>/dev/null|awk '/total/{print $1}')"
    sync_fs
@@ -427,6 +460,8 @@ echo "*** overall status *******************************************************
 duration="$(( SECONDS  / 60 ))"
 if [ "$failed" -gt "0" ];then
    send_status "error: backup failed after ${duration} minutes, there are $failed execution steps ($successful successful steps, $database_count databases)"
+   exit 1
 else
    send_status "ok: backup successful after ${duration} minutes, $successful successful steps with $database_count databases"
+   exit 0
 fi

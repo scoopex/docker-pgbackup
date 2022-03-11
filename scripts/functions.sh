@@ -13,8 +13,9 @@ function send_status(){
     local status="$1"
     log "$status" 
     if [ -n "${zabbix_server}" ] && [ -n "${zabbix_host}" ];then
-      zabbix_sender -s "${zabbix_host}" -c /etc/zabbix/zabbix_agentd.conf \
-		-k postgresql.backup.globalstatus -o "$status" > /dev/null || true
+      zabbix_sender -vv --zabbix-server="${zabbix_server}" --port="${zabbix_port}" --host="${zabbix_host}" \
+         --key="postgresql.backup.globalstatus" \
+         --value="$status" || true
     fi
 }
 

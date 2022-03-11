@@ -1,6 +1,7 @@
 #!/bin/bash
 
 set -eux
+export DEBIAN_FRONTEND=noninteractive
 
 chmod 755 /scripts
 chmod 644 /scripts/*
