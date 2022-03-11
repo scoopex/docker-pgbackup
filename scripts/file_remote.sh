@@ -15,7 +15,7 @@ elif [ "$1" = "get" ];then
       echo "error: target file '$target_file' already exits"
       exit 1
    fi
-   az storage blob download  --name "${file_name}" --container "${3:-$BUCKET_NAME}" --output table --file "${target_file}"
+   az storage blob download  --name "${file_name}" --container "${3:-$BUCKET_NAME}" --file "${target_file}"
    ret="$?"
    if [ "$ret" = "0" ];then
       log "info: download successful"
