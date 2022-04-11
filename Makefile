@@ -10,7 +10,7 @@ IMAGE_NAME = pgbackup
 build:
 	@echo "the FORCE_UPGRADE_MARKER variable forces a upgrade every day, current value is : ${FORCE_UPGRADE_MARKER}"
 	docker build --build-arg FORCE_UPGRADE_MARKER="${FORCE_UPGRADE_MARKER}" -t ${IMAGE_NAME}:${VERSION} -f Dockerfile .
-	docker images zabbix-sidecar:dev --format='DOCKER IMAGESIZE{{.Size}}'
+	docker images ${IMAGE_NAME}:${VERSION} --format='DOCKER IMAGESIZE: {{.Size}}'
 
 perms: 
 	find scripts -type f -exec chmod 644 {} \;
