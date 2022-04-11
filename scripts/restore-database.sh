@@ -1,6 +1,6 @@
 #!/bin/bash
 
-
+set -eu
 run_dir="$(dirname "$(readlink -f "$0")")"
 # shellcheck source=/dev/null
 source "${run_dir}/functions.sh"
@@ -14,6 +14,7 @@ export PGUSER="${POSTGRESQL_USERNAME:?Postgres Username}"
 export PGPORT="${POSTGRESQL_PORT:-5432}"
 export PGHOST="${POSTGRESQL_HOST:?postgres host}"
 export PGPASSWORD="${POSTGRESQL_PASSWORD:?postgres superuser password}"
+set +eu
 
 if [ -z "$database" ];then
    echo "$0 <file> <database>"
@@ -80,7 +81,7 @@ case $file in
       ;;
    *)
       log "performing custom backup restore"
-      pg_restore -j8 --verbose --exit-on-error --clean --if-exists -Fc -d "${database}" "${file}"
+      pg_restore -j8 --verbose --exit-on-error --clean --if-exists -Fc -d "${database}" ${EXTRA_ARGS:-} "${file}"
       ret="$?"
       ;;
 esac
