@@ -249,7 +249,10 @@ FROM pg_catalog.pg_database d
         ELSE NULL
     END DESC -- nulls first
     ;
+
 EOF
+
+pg_dumpall -s --roles-only|sed "~s,PASSWORD '..*',PASSWORD 'REDACTED',"|grep -P "^(CREATE|ALTER)"|sort -r
 
 for dbname in $databases;
 do
@@ -306,9 +309,9 @@ if [ "$base_backup" = "true" ];then
 
      echo "switching wal/xlog"
      if [ "$(get_major_version)" -gt "11" ];then
-         psql -q -t -A -c "select * from pg_switch_xlog();"
-     else
          psql -q -t -A -c "select * from pg_switch_wal();"
+     else
+         psql -q -t -A -c "select * from pg_switch_xlog();"
      fi
 
      # Environment variables for the postgres clients

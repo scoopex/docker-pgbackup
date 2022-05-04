@@ -10,9 +10,12 @@ apt-get update
 apt-get install curl gnupg2 -y
 echo "deb http://apt.postgresql.org/pub/repos/apt ${DISTRIB_CODENAME}-pgdg main" > /etc/apt/sources.list.d/pgdg.list
 curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
-apt-get update 
 
-apt-get install postgresql-client-14 zabbix-agent curl vim-tiny s3cmd pv azure-cli screen pgtop pg-activity pgcli openssh-client less -y
+curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+az version
+
+apt-get update 
+apt-get install postgresql-client-14 zabbix-agent curl vim-tiny s3cmd pv screen pgtop pg-activity pgcli openssh-client less -y
 apt-get upgrade -y
 apt-get dist-upgrade -y
 apt-get autoremove -y
@@ -33,6 +36,10 @@ echo "ROOT PASSWORD : $ROOTPW" >&2
 
 groupadd -g 1001 pgbackup
 useradd -g pgbackup -G pgbackup -u 1001 -m -s /bin/bash pgbackup
+
+# resources
+res_dir="/tmp/setup"
+cp -v ${res_dir}/resources/screenrc /home/pgbackup/.screenrc
 
 chown -R pgbackup:pgbackup /home/pgbackup
 

@@ -37,6 +37,7 @@ inspect: perms
 		-e POSTGRESQL_USERNAME="postgresql" \
 		-e POSTGRESQL_PASSWORD="password" \
 		-e POSTGRESQL_HOST="postgresql" \
+		-e ZABBIX_PROXY_SERVER_HOST="yolo-zabbix" \
 		-e CRYPT_FILE=/srv/conf/gpg-passphrase ${IMAGE_NAME}:${VERSION} -- /bin/bash
 
 publish: build
