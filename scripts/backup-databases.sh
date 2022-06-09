@@ -31,7 +31,7 @@ upload_type="${UPLOAD_TYPE:-off}"
 s3_cfg="${S3_CFG:-/srv/conf/s3cfg}"
 
 zabbix_port="${ZABBIX_SERVER_PORT:-10051}"
-if [ -n "$ZABBIX_PROXY_SERVER_HOST" ];then
+if [ "${ZABBIX_PROXY_SERVER_HOST:-none}" != "none" ];then
    zabbix_server="${ZABBIX_PROXY_SERVER_HOST}"
 else
    zabbix_server="${ZABBIX_SERVER:-}"
@@ -59,7 +59,7 @@ if [ "$base_backup" = "true" ];then
    base_backup_password="${POSTGRESQL_REPLICATION_PASSWORD?Replication Password}"
 fi
 
-if [[ -n "$crypt_password"  ]];then
+if [ "${crypt_password:-none}" != "none" ];then
    crypt_file="$HOME/.crypt_password"
    echo -n "$crypt_password" > "$crypt_file"
 fi
