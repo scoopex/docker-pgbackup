@@ -15,7 +15,7 @@ curl -sL https://aka.ms/InstallAzureCLIDeb | bash
 az version
 
 apt-get update 
-apt-get install postgresql-client-14 zabbix-agent curl vim-tiny s3cmd pv screen pgtop pg-activity pgcli openssh-client less -y
+apt-get install postgresql-client-15 zabbix-agent curl vim-tiny s3cmd pv screen pgtop pg-activity pgcli openssh-client less -y
 apt-get upgrade -y
 apt-get dist-upgrade -y
 apt-get autoremove -y
