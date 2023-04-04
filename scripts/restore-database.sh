@@ -81,8 +81,15 @@ case $file in
       ;;
    *)
       log "performing custom backup restore"
-      pg_restore -j8 --verbose --exit-on-error --clean --if-exists -Fc -d "${database}" ${EXTRA_ARGS:-} "${file}"
+      if [ "${ON_ERROR_STOP:-on}" == "on" ];then
+	      ON_ERROR_STOP="--exit-on-error"
+      else
+	      ON_ERROR_STOP=""
+      fi
+      set -x
+      pg_restore -j8 --verbose $ON_ERROR_STOP --clean --if-exists -Fc -d "${database}" ${EXTRA_ARGS:-} "${file}"
       ret="$?"
+      set +x
       ;;
 esac
 
