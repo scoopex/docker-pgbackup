@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -u 
+set -u
 
 #######################################################################################################################################
 ####
@@ -96,6 +96,7 @@ function upload_backup_setup(){
 
 function upload_backup(){
  local upload_name="${1:?}"
+ local ret_upload=0
  if [ "$upload_type" = "s3" ];then
      s3_address="${bucket_name}/${pg_ident}/${upload_name}"
      if ( s3cmd info "$s3_address" &> /dev/null );then
@@ -112,7 +113,7 @@ function upload_backup(){
     ret_upload="$?"
  fi
 
- if [ "$ret_upload" != "0" ];then
+ if [[ "$ret_upload" != "0" ]];then
 	return 1
  fi
  return 0
@@ -205,7 +206,7 @@ fi
 
 if ! cd "${backup_dir}" ;then
    echo "Unable to change to dir '${backup_dir}'"
-	exit 1 
+	exit 1
 fi
 
 if ! echo "$upload_type" |grep -q  -P '^(s3|az|off)$'; then
@@ -261,7 +262,7 @@ do
    starttime="$SECONDS"
    if [ "$backup_type" = "no" ];then
       echo "per database backup disabled"
-      continue 
+      continue
    fi
 
    echo "=> backup schema"
@@ -270,11 +271,11 @@ do
 
    echo "=> backup database"
    if [ "$backup_type" = "custom" ];then
-      pg_dump -Fc -c -f "${dump_dir}/${dbname}-${timestamp_isoish}_currently_dumping.custom.gz" -Z 7 --inserts "$dbname" && 
+      pg_dump -Fc -c -f "${dump_dir}/${dbname}-${timestamp_isoish}_currently_dumping.custom.gz" -Z 7 --inserts "$dbname" &&
          mv "${dump_dir}/${dbname}-${timestamp_isoish}_currently_dumping.custom.gz" "${dump_dir}/${dbname}-${timestamp_isoish}.custom.gz"
       exitcode2="$?"
    else
-      pg_dump -f "${dump_dir}/${dbname}-${timestamp_isoish}_currently_dumping.sql.gz" -Z 7 "$dbname" && 
+      pg_dump -f "${dump_dir}/${dbname}-${timestamp_isoish}_currently_dumping.sql.gz" -Z 7 "$dbname" &&
          mv "${dump_dir}/${dbname}-${timestamp_isoish}_currently_dumping.sql.gz" "${dump_dir}/${dbname}-${timestamp_isoish}.sql.gz"
       exitcode2="$?"
    fi
@@ -339,7 +340,7 @@ fi
 sync_fs
 
 duration="$(( $(( SECONDS - startime_backup )) / 60 ))"
-if [ "$failed" -gt 0 ];then 
+if [ "$failed" -gt 0 ];then
   send_status "error: failed ($failed failed backups,  $successful successful backup ($duration minutes)"
 else
   send_status "$successful backups were successful ($duration minutes)"
@@ -396,7 +397,7 @@ fi
 
 sync_fs
 
- 
+
 log "*** upload backups ******************************************************************************"
 send_status "uploading encrypted files now"
 
@@ -445,7 +446,7 @@ if ( echo -n "$maxage_days_local"|grep -P -q '^\d+$' ) && [ "$maxage_days_local"
    sync_fs
 else
    log "error: age not correctly defined, '$maxage_days_local'"
-   exit 1 
+   exit 1
 fi
 
 if [[ -n "$maxage_days_remote" ]] && [[ "$maxage_days_remote" = "0" ]] && [[ -n "$bucket_name" ]] && [[ "$upload_type" == "s3" ]];then
