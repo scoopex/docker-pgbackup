@@ -4,7 +4,7 @@ VERSION = $(shell git describe --abbrev=0 --tags)
 
 FORCE_UPGRADE_MARKER ?= $(shell date "+%Y-%m-%d")
 
-IMAGE_REPO = getflip
+IMAGE_REPO = flipistry.azurecr.io/flipnext
 IMAGE_NAME = pgbackup
 
 build:
@@ -12,7 +12,13 @@ build:
 	docker build --build-arg FORCE_UPGRADE_MARKER="${FORCE_UPGRADE_MARKER}" -t ${IMAGE_NAME}:${VERSION} -f Dockerfile .
 	docker images ${IMAGE_NAME}:${VERSION} --format='DOCKER IMAGESIZE: {{.Size}}'
 
-perms: 
+# make it possible to build x86 on arm64 (macbook m1/m2)
+buildx_and_push:
+	@echo "the FORCE_UPGRADE_MARKER variable forces a upgrade every day, current value is : ${FORCE_UPGRADE_MARKER}"
+	docker buildx build --platform linux/amd64,linux/arm64 --build-arg FORCE_UPGRADE_MARKER="${FORCE_UPGRADE_MARKER}" -t ${IMAGE_REPO}/${IMAGE_NAME}:${VERSION} -f Dockerfile . --push
+	docker images ${IMAGE_NAME}:${VERSION} --format='DOCKER IMAGESIZE: {{.Size}}'
+
+perms:
 	find scripts -type f -exec chmod 644 {} \;
 	find scripts -type d -exec chmod 755 {} \;
 	find scripts -type f -name "*.sh" -exec chmod 755 {} \;
@@ -28,7 +34,7 @@ endif
 		-e ENV_FILE=/srv/conf/${PROFILE}.env \
 		-e CRYPT_FILE=/srv/conf/gpg-passphrase ${IMAGE_NAME}:${VERSION}
 
-inspect: perms 
+inspect: perms
 	docker run -ti --network host --hostname "test-manual" \
 		-v /etc/hosts:/etc/hosts \
 		-v ${PWD}/backups/test/:/srv \
