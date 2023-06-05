@@ -436,11 +436,11 @@ if ( echo -n "$maxage_days_local"|grep -P -q '^\d+$' ) && [ "$maxage_days_local"
    echo "deleting outdated backup on pv (older than $maxage_days_local days)"
    find "${backup_dir}" -type f -name "*.custom.gz*" -mtime "+${maxage_days_local}" -exec rm -fv {} \;
    find "${backup_dir}" -type f -name "*.sql.gz*" -mtime "+${maxage_days_local}" -exec rm -fv {} \;
-   find "${backup_dir}" -type d -name "base_backup_????-??-??_??-??-??" -mtime "+${maxage_days_local}" -maxdepth 1 -exec rm -frv {} \;
+   find "${backup_dir}" -maxdepth 1  -type d -name "base_backup_????-??-??_??-??-??" -mtime "+${maxage_days_local}" -exec rm -frv {} \;
    find "${backup_dir}" -type f -name "*_currently_encrypting.gpg" -mtime +1 -exec rm -fv {} \;
    find "${dump_dir}" -type f -name "*_currently_dumping.sql.gz" -mtime +1 -exec rm -fv {} \;
    find "${dump_dir}" -type f -name "*_currently_dumping.custom.gz" -mtime +1 -exec rm -fv {} \;
-   find "${dump_dir}" -type d -name "*_currently_dumping" -mtime +1 -maxdepth 1 -exec rm -frv {} \;
+   find "${dump_dir}" -maxdepth 1 -type d -name "*_currently_dumping" -mtime +1 -exec rm -frv {} \;
    cd "${backup_dir}"
    send_status "total amount of backups on pv : $( du -scmh -- *.gz *.gpg 2>/dev/null|awk '/total/{print $1}')"
    sync_fs
